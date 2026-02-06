@@ -1,4 +1,4 @@
-# Strata
+# Strata v2.8.2
 
 A hierarchical note-taking and knowledge management application with Google Drive integration, built with React and Vite.
 
@@ -101,6 +101,15 @@ Strata-vite/
 ├── package.json
 └── vite.config.js
 ```
+
+## Changelog
+
+### v2.8.2
+- Removed debug instrumentation logging left over from development
+- Deployed to GitHub Pages with CI/CD workflow
+
+### v2.8.0
+- Initial standalone release migrated from parent Strata project
 
 ## License
 

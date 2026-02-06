@@ -269,14 +269,6 @@ function App() {
     setActivePageRows(tree);
   }, [data, activePageId, activeTabId, activeNotebookId]);
 
-  // #region agent log
-  useEffect(() => {
-    if (activePage) {
-      fetch('http://127.0.0.1:7242/ingest/b3d72f9b-db75-4eaa-8a60-90b1276ac978',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:activePage-effect',message:'Active page changed',data:{pageId:activePage.id,pageName:activePage.name,pageType:activePage.type,hasEmbedUrl:!!activePage.embedUrl,embedUrl:activePage.embedUrl,driveFileId:activePage.driveFileId,googleFileId:activePage.googleFileId,url:activePage.url,webViewLink:activePage.webViewLink,allKeys:Object.keys(activePage)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H6-H8'})}).catch(()=>{});
-    }
-  }, [activePage]);
-  // #endregion
-
   useEffect(() => {
     dataRef.current = data;
     activePageRowsRef.current = activePageRows;
@@ -820,15 +812,9 @@ function App() {
   }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
 
   const addEmbedPageFromUrl = useCallback((rawUrl) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b3d72f9b-db75-4eaa-8a60-90b1276ac978',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:addEmbedPageFromUrl-entry',message:'addEmbedPageFromUrl called',data:{rawUrl,hasActiveTabId:!!activeTabId,activeTabId,activeNotebookId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ADD1'})}).catch(()=>{});
-    // #endregion
     if (!activeTabId || !rawUrl) return false;
     
     const parsed = parseEmbedUrl(rawUrl);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b3d72f9b-db75-4eaa-8a60-90b1276ac978',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:addEmbedPageFromUrl-parsed',message:'parseEmbedUrl result',data:{parsed,rawUrl},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ADD2'})}).catch(()=>{});
-    // #endregion
     if (!parsed) {
       showNotification('Could not parse Google Drive or PDF URL', 'error');
       return false;
@@ -847,10 +833,6 @@ function App() {
       createdAt: Date.now()
     };
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b3d72f9b-db75-4eaa-8a60-90b1276ac978',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:addEmbedPageFromUrl-newPage',message:'Creating new page',data:{newPage},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ADD3'})}).catch(()=>{});
-    // #endregion
-    
     const newData = {
       ...data,
       notebooks: data.notebooks.map(nb => 
@@ -868,18 +850,12 @@ function App() {
     };
     setData(newData);
     setActivePageId(newPage.id);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b3d72f9b-db75-4eaa-8a60-90b1276ac978',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:addEmbedPageFromUrl-success',message:'Page added successfully',data:{newPageId:newPage.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ADD4'})}).catch(()=>{});
-    // #endregion
     showNotification(`Google ${parsed.typeName} added`, 'success');
     triggerStructureSync();
     return true;
   }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
 
   const addGooglePage = useCallback((file) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b3d72f9b-db75-4eaa-8a60-90b1276ac978',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:addGooglePage-entry',message:'addGooglePage called',data:{file,hasActiveTabId:!!activeTabId,activeTabId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'ADD5'})}).catch(()=>{});
-    // #endregion
     if (!activeTabId || !file) return;
     
     let icon, typeName, pageType;

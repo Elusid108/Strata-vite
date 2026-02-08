@@ -175,7 +175,8 @@ function App() {
     handleSignOut,
     loadFromDrive,
     triggerStructureSync,
-    syncRenameToDrive
+    syncRenameToDrive,
+    queueDriveDelete
   } = useGoogleDrive(data, setData, showNotification);
   
   // History hook - manages undo/redo
@@ -220,37 +221,41 @@ function App() {
         return true;
       };
 
-      // Always try localStorage first for instant load
-      const localData = loadFromLocalStorage();
-      if (localData && localData.notebooks?.length > 0) {
-        setData(localData);
-        setActiveFromData(localData);
-      }
-
       if (isAuthenticated) {
-        // Then sync from Drive in background (will merge/update if needed)
+        // Drive is the single source of truth -- always load from Drive
         try {
           const driveData = await loadFromDrive();
-          if (driveData && driveData.notebooks && driveData.notebooks.length > 0) {
-            // Only update if we didn't have local data, or if Drive data is different
-            if (!localData || !localData.notebooks?.length) {
-              setData(driveData);
-              setActiveFromData(driveData);
-            }
-            // Note: If local data exists, we keep it and let the sync mechanism handle updates
-            // This prevents the "reset" behavior on refresh
+          if (driveData?.notebooks?.length > 0) {
+            setData(driveData);
+            setActiveFromData(driveData);
+          } else {
+            // Empty Drive = fresh account, use initial data
+            setData(INITIAL_DATA);
+            setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
+            setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
+            setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);
           }
         } catch (error) {
           console.error('Error loading from Drive:', error);
-          if (!localData || !localData.notebooks?.length) {
-            showNotification('Failed to load from Drive.', 'error');
+          showNotification('Failed to load from Drive. Using local data as fallback.', 'error');
+          // Fallback to localStorage only on Drive failure
+          const localData = loadFromLocalStorage();
+          if (localData?.notebooks?.length > 0) {
+            setData(localData);
+            setActiveFromData(localData);
+          } else {
+            setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
+            setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
+            setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);
           }
         }
-      }
-
-      // Fallback to initial data if nothing loaded
-      if (!localData || !localData.notebooks?.length) {
-        if (!isAuthenticated) {
+      } else {
+        // Not signed in -- localStorage fallback
+        const localData = loadFromLocalStorage();
+        if (localData?.notebooks?.length > 0) {
+          setData(localData);
+          setActiveFromData(localData);
+        } else {
           setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
           setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
           setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);
@@ -949,7 +954,31 @@ function App() {
     const newData = JSON.parse(JSON.stringify(data));
     let nextId = null;
 
+    // Collect Drive IDs to delete before removing from local data
+    const driveIdsToDelete = [];
+    const collectDriveIds = (item, itemType) => {
+      if (itemType === 'notebook') {
+        if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
+        // Also collect child tab/page Drive IDs
+        for (const tab of (item.tabs || [])) {
+          if (tab.driveFolderId) driveIdsToDelete.push(tab.driveFolderId);
+          for (const page of (tab.pages || [])) {
+            if (page.driveFileId) driveIdsToDelete.push(page.driveFileId);
+          }
+        }
+      } else if (itemType === 'tab') {
+        if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
+        for (const page of (item.pages || [])) {
+          if (page.driveFileId) driveIdsToDelete.push(page.driveFileId);
+        }
+      } else if (itemType === 'page') {
+        if (item.driveFileId) driveIdsToDelete.push(item.driveFileId);
+      }
+    };
+
     if (type === 'notebook') {
+      const notebook = newData.notebooks.find(n => n.id === id);
+      if (notebook) collectDriveIds(notebook, 'notebook');
       const idx = newData.notebooks.findIndex(n => n.id === id);
       if (activeNotebookId === id) {
         if (idx < newData.notebooks.length - 1) nextId = newData.notebooks[idx + 1].id;
@@ -984,6 +1013,8 @@ function App() {
       for (let nb of newData.notebooks) {
         if (nb.id !== activeNotebookId) continue;
         if (type === 'tab') {
+          const tab = nb.tabs.find(t => t.id === id);
+          if (tab) collectDriveIds(tab, 'tab');
           const idx = nb.tabs.findIndex(t => t.id === id);
           if (activeTabId === id) {
             if (idx < nb.tabs.length - 1) nextId = nb.tabs[idx + 1].id;
@@ -996,6 +1027,8 @@ function App() {
         } else if (type === 'page') {
           for (let tab of nb.tabs) {
             if (tab.id !== activeTabId) continue;
+            const page = tab.pages.find(p => p.id === id);
+            if (page) collectDriveIds(page, 'page');
             const idx = tab.pages.findIndex(p => p.id === id);
             if (activePageId === id) {
               if (idx < tab.pages.length - 1) nextId = tab.pages[idx + 1].id;
@@ -1011,13 +1044,18 @@ function App() {
       }
     }
     
+    // Queue Drive deletions
+    if (driveIdsToDelete.length > 0) {
+      queueDriveDelete(driveIdsToDelete);
+    }
+
     setData(newData);
     if (itemToDelete && itemToDelete.id === id) setItemToDelete(null);
     if (activeTabMenu && activeTabMenu.id === id) setActiveTabMenu(null);
     if (selectedBlockId === id) setSelectedBlockId(null);
     showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted`, 'success');
     triggerStructureSync();
-  }, [saveToHistory, data, setData, activeNotebookId, activeTabId, activePageId, selectTab, selectPage, showNotification, triggerStructureSync, itemToDelete, activeTabMenu, selectedBlockId]);
+  }, [saveToHistory, data, setData, activeNotebookId, activeTabId, activePageId, selectTab, selectPage, showNotification, triggerStructureSync, queueDriveDelete, itemToDelete, activeTabMenu, selectedBlockId]);
 
   const confirmDelete = useCallback(() => {
     if (!itemToDelete) return;

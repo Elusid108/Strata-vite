@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { APP_VERSION } from '../lib/constants';
 import * as GoogleAPI from '../lib/google-api';
 import { generateOfflineViewerHtml } from '../lib/offline-viewer';
+import { cleanupOrphans } from '../lib/reconciler';
 
 /**
  * Hook for managing Google Drive authentication and sync
@@ -25,10 +26,22 @@ export function useGoogleDrive(data, setData, showNotification) {
   // Structure version for triggering sync
   const [structureVersion, setStructureVersion] = useState(0);
   
+  // Content sync version for triggering content sync retries
+  const [contentSyncVersion, setContentSyncVersion] = useState(0);
+  
   // Sync lock refs
   const syncLockRef = useRef(false);
   const pendingSyncRef = useRef(false);
   const lastContentSyncRef = useRef(Date.now());
+  
+  // Pending Drive deletes queue
+  const pendingDriveDeletesRef = useRef([]);
+  
+  // Pending content sync flag
+  const pendingContentSyncRef = useRef(false);
+  
+  // Orphan cleanup -- run once per session
+  const orphanCleanupDoneRef = useRef(false);
 
   // Initialize Google APIs and check auth status
   useEffect(() => {
@@ -112,6 +125,39 @@ export function useGoogleDrive(data, setData, showNotification) {
     initDriveSync();
   }, [isAuthenticated, isLoadingAuth]);
 
+  // Run orphan cleanup once per session after Drive is ready
+  useEffect(() => {
+    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !data) return;
+    if (orphanCleanupDoneRef.current) return;
+    
+    // Only run if we have some data loaded (not empty initial state)
+    if (!data.notebooks || data.notebooks.length === 0) return;
+    
+    orphanCleanupDoneRef.current = true;
+    
+    // Fire-and-forget background cleanup with a delay to not interfere with initial sync
+    const cleanupTimeout = setTimeout(() => {
+      cleanupOrphans(data, driveRootFolderId).catch(err => {
+        console.error('Background orphan cleanup failed:', err);
+      });
+    }, 5000);
+    
+    return () => clearTimeout(cleanupTimeout);
+  }, [isAuthenticated, isLoadingAuth, driveRootFolderId, data]);
+
+  // Queue a Drive item for deletion during next structure sync
+  const queueDriveDelete = useCallback((driveIds) => {
+    // driveIds can be a single string or array of { type, driveId } objects
+    if (!driveIds) return;
+    const items = Array.isArray(driveIds) ? driveIds : [driveIds];
+    for (const item of items) {
+      const id = typeof item === 'string' ? item : item.driveId;
+      if (id) {
+        pendingDriveDeletesRef.current.push(id);
+      }
+    }
+  }, []);
+
   // Sync folder structure to Drive
   useEffect(() => {
     if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !data) return;
@@ -125,6 +171,20 @@ export function useGoogleDrive(data, setData, showNotification) {
       
       try {
         setIsSyncing(true);
+
+        // Drain pending deletes queue
+        if (pendingDriveDeletesRef.current.length > 0) {
+          const deletesToProcess = [...pendingDriveDeletesRef.current];
+          pendingDriveDeletesRef.current = [];
+          for (const driveId of deletesToProcess) {
+            try {
+              await GoogleAPI.deleteDriveItem(driveId);
+            } catch (error) {
+              console.error(`Error deleting Drive item ${driveId}:`, error);
+            }
+          }
+        }
+
         const driveIdUpdates = {};
 
         // Sync each notebook
@@ -235,6 +295,12 @@ export function useGoogleDrive(data, setData, showNotification) {
           pendingSyncRef.current = false;
           setTimeout(syncStructure, 1000);
         }
+        
+        // If a content sync was blocked by the lock, trigger a retry
+        if (pendingContentSyncRef.current) {
+          pendingContentSyncRef.current = false;
+          setTimeout(() => setContentSyncVersion(v => v + 1), 2000);
+        }
       }
     };
 
@@ -248,7 +314,10 @@ export function useGoogleDrive(data, setData, showNotification) {
     if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !data) return;
     
     const syncContent = async () => {
-      if (syncLockRef.current) return;
+      if (syncLockRef.current) {
+        pendingContentSyncRef.current = true;
+        return;
+      }
       
       for (const notebook of data.notebooks) {
         for (const tab of notebook.tabs) {
@@ -276,7 +345,7 @@ export function useGoogleDrive(data, setData, showNotification) {
 
     const contentSyncTimeout = setTimeout(syncContent, 10000);
     return () => clearTimeout(contentSyncTimeout);
-  }, [data?.notebooks, isAuthenticated, isLoadingAuth, driveRootFolderId]);
+  }, [data?.notebooks, isAuthenticated, isLoadingAuth, driveRootFolderId, contentSyncVersion]);
 
   // Trigger structure sync
   const triggerStructureSync = useCallback(() => {
@@ -405,6 +474,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     handleSignOut,
     loadFromDrive,
     triggerStructureSync,
-    syncRenameToDrive
+    syncRenameToDrive,
+    queueDriveDelete
   };
 }

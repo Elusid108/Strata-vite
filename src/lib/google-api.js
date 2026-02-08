@@ -63,24 +63,34 @@ const loadGapi = () => {
             return;
         }
 
-        if (typeof gapi === 'undefined') {
-            reject(new Error('Google API script not loaded'));
-            return;
-        }
+        const MAX_WAIT = 10000; // 10 seconds
+        const INTERVAL = 100;  // check every 100ms
+        let elapsed = 0;
 
-        gapi.load('client', async () => {
-            try {
-                await gapi.client.init({
-                    apiKey: API_KEY,
-                    discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
+        const waitForGapi = () => {
+            if (typeof gapi !== 'undefined') {
+                gapi.load('client', async () => {
+                    try {
+                        await gapi.client.init({
+                            apiKey: API_KEY,
+                            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
+                        });
+                        gapiLoaded = true;
+                        resolve();
+                    } catch (error) {
+                        console.error('Error loading gapi:', error);
+                        reject(error);
+                    }
                 });
-                gapiLoaded = true;
-                resolve();
-            } catch (error) {
-                console.error('Error loading gapi:', error);
-                reject(error);
+            } else if (elapsed >= MAX_WAIT) {
+                reject(new Error('Google API script failed to load within timeout'));
+            } else {
+                if (elapsed === 0) console.warn('Waiting for Google API script to load...');
+                elapsed += INTERVAL;
+                setTimeout(waitForGapi, INTERVAL);
             }
-        });
+        };
+        waitForGapi();
     });
 };
 
@@ -96,12 +106,28 @@ const initGoogleAuth = () => {
             return;
         }
 
-        if (typeof google === 'undefined' || !google.accounts) {
-            reject(new Error('Google Identity Services script not loaded'));
-            return;
-        }
+        const MAX_WAIT = 10000; // 10 seconds
+        const INTERVAL = 100;  // check every 100ms
+        let elapsed = 0;
 
-        try {
+        const waitForGis = () => {
+            if (typeof google !== 'undefined' && google.accounts) {
+                initTokenClient(resolve, reject);
+            } else if (elapsed >= MAX_WAIT) {
+                reject(new Error('Google Identity Services script failed to load within timeout'));
+            } else {
+                if (elapsed === 0) console.warn('Waiting for Google Identity Services script to load...');
+                elapsed += INTERVAL;
+                setTimeout(waitForGis, INTERVAL);
+            }
+        };
+        waitForGis();
+    });
+};
+
+// Helper to create the token client (extracted for readability)
+const initTokenClient = (resolve, reject) => {
+    try {
         tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: CLIENT_ID,
             scope: SCOPES.join(' '),
@@ -153,10 +179,9 @@ const initGoogleAuth = () => {
 
         gisLoaded = true;
         resolve();
-        } catch (initErr) {
-            reject(initErr);
-        }
-    });
+    } catch (initErr) {
+        reject(initErr);
+    }
 };
 
 // Sign in user

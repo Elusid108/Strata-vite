@@ -1,5 +1,5 @@
 // --- App Version ---
-export const APP_VERSION = "2.8.2";
+export const APP_VERSION = "2.9.0";
 
 // --- Tree Version ---
 export const TREE_VERSION = 2;

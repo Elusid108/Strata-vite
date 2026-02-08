@@ -1,4 +1,4 @@
-# Strata v2.8.2
+# Strata v2.9.0
 
 A hierarchical note-taking and knowledge management application with Google Drive integration, built with React and Vite.
 
@@ -7,12 +7,12 @@ A hierarchical note-taking and knowledge management application with Google Driv
 - **Nested Notebooks/Tabs/Pages** - Organize content in a flexible tree structure
 - **Rich Content Blocks** - Headings, lists, todos, images, videos, links, and dividers via slash commands
 - **Google Drive Integration** - Embed Google Docs, Sheets, Slides, Drawings, and Forms directly in pages
+- **Google Drive as Source of Truth** - Drive data loads on sign-in; all local changes sync back to Drive
 - **Interactive Maps** - Embed Leaflet maps with markers and configuration
 - **Mermaid Diagrams** - Create flowcharts, sequence diagrams, and more
 - **Canvas Pages** - Freeform layout pages
 - **Table/Database Pages** - Structured data views
 - **Dark Mode** - Full light/dark theme support
-- **Offline Support** - Local storage with offline viewing capabilities
 
 ## Tech Stack
 
@@ -103,6 +103,13 @@ Strata-vite/
 ```
 
 ## Changelog
+
+### v2.9.0
+- **Drive-first sync overhaul** -- Google Drive is now the single source of truth; on sign-in, Drive data always loads and overwrites local state
+- **Fixed Google API script loading race condition** -- `loadGapi` and `initGoogleAuth` now poll for async scripts instead of failing instantly
+- **Delete propagation to Drive** -- deleting notebooks, tabs, or pages locally now trashes the corresponding Drive files/folders
+- **Content sync reliability** -- content syncs blocked by the structure sync lock are now retried instead of silently dropped
+- **Orphan cleanup** -- wired in background reconciler that detects and moves orphan Drive items to `_STRATA_TRASH` after sign-in
 
 ### v2.8.2
 - Removed debug instrumentation logging left over from development

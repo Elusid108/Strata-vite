@@ -430,7 +430,8 @@ function App() {
     }
     if (syncContentDebounceRef.current) { clearTimeout(syncContentDebounceRef.current); syncContentDebounceRef.current = null; }
     scheduleSyncToData();
-  }, [scheduleSyncToData, setData]);
+    triggerContentSync();
+  }, [scheduleSyncToData, setData, triggerContentSync]);
 
   const handleRemoveBlock = useCallback((blockId) => {
     const tree = activePageRowsRef.current;
@@ -1526,7 +1527,6 @@ function App() {
           </button>
           {!settings.condensedView && (
             <div className="flex items-center gap-2 text-xs text-gray-400">
-              <span>v{APP_VERSION}</span>
               {isSyncing && <span className="text-blue-400 animate-pulse">Syncing...</span>}
             </div>
           )}

@@ -137,8 +137,45 @@ const cleanupOrphans = async (data, rootFolderId) => {
     }
 };
 
+/**
+ * Reconcile a single page to ensure Code/Mermaid pages have expected shape
+ * @param {Object} page - Page object
+ * @returns {Object} Reconciled page with normalized code fields
+ */
+const reconcilePage = (page) => {
+    if (!page) return page;
+    if (page.type !== 'mermaid' && page.type !== 'code') return page;
+    const codeVal = page.code ?? page.mermaidCode ?? page.codeContent ?? '';
+    return {
+        ...page,
+        code: codeVal,
+        mermaidCode: page.mermaidCode ?? (page.codeType === 'mermaid' ? codeVal : ''),
+        codeType: page.codeType || 'mermaid',
+        mermaidViewport: page.mermaidViewport || { x: 0, y: 0, scale: 1 }
+    };
+};
+
+/**
+ * Reconcile full data structure - ensures all Code/Mermaid pages have normalized fields
+ * @param {Object} data - App data ({ notebooks: [...] })
+ * @returns {Object} Reconciled data
+ */
+const reconcileData = (data) => {
+    if (!data?.notebooks) return data;
+    return {
+        ...data,
+        notebooks: data.notebooks.map(nb => ({
+            ...nb,
+            tabs: (nb.tabs || []).map(tab => ({
+                ...tab,
+                pages: (tab.pages || []).map(reconcilePage)
+            }))
+        }))
+    };
+};
+
 // Named exports
-export { cleanupOrphans, collectKnownDriveIds };
+export { cleanupOrphans, collectKnownDriveIds, reconcilePage, reconcileData };
 
 // Default export
-export default { cleanupOrphans, collectKnownDriveIds };
+export default { cleanupOrphans, collectKnownDriveIds, reconcilePage, reconcileData };

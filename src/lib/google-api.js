@@ -1321,8 +1321,11 @@ const savePageFile = async (page, tabFolderId) => {
         };
         
         // Add page-type-specific content
-        if (page.type === 'mermaid') {
-            pageContent.mermaidCode = page.mermaidCode ?? '';
+        if (page.type === 'mermaid' || page.type === 'code') {
+            const codeVal = page.code ?? page.mermaidCode ?? page.codeContent ?? '';
+            pageContent.code = codeVal;
+            pageContent.mermaidCode = page.mermaidCode ?? (page.codeType === 'mermaid' ? codeVal : '');
+            pageContent.codeType = page.codeType || 'mermaid';
             if (page.mermaidViewport) pageContent.mermaidViewport = page.mermaidViewport;
         }
         if (page.type === 'canvas') {
@@ -1330,10 +1333,6 @@ const savePageFile = async (page, tabFolderId) => {
         }
         if (page.type === 'database') {
             pageContent.databaseData = page.databaseData;
-        }
-        if (page.type === 'code') {
-            pageContent.codeContent = page.codeContent;
-            pageContent.codeType = page.codeType;
         }
         
         const properties = {
@@ -2089,19 +2088,19 @@ const loadFromDriveStructure = async (rootFolderId) => {
                     page.createdAt = pageContent.createdAt || page.createdAt;
                     page.modifiedAt = pageContent.modifiedAt || page.modifiedAt;
                     
-                    if (pageType === 'mermaid') {
-                        page.mermaidCode = pageContent.mermaidCode || '';
+                    if (pageType === 'mermaid' || pageType === 'code') {
+                        const codeVal = pageContent.code ?? pageContent.codeContent ?? pageContent.mermaidCode ?? '';
+                        page.code = codeVal;
+                        page.mermaidCode = pageContent.mermaidCode ?? (pageContent.codeType === 'mermaid' ? codeVal : '');
+                        page.codeType = pageContent.codeType || 'mermaid';
                         page.mermaidViewport = pageContent.mermaidViewport;
+                        page.codeContent = pageContent.codeContent ?? codeVal;
                     }
                     if (pageType === 'canvas') {
                         page.canvasData = pageContent.canvasData;
                     }
                     if (pageType === 'database') {
                         page.databaseData = pageContent.databaseData;
-                    }
-                    if (pageType === 'code') {
-                        page.codeContent = pageContent.codeContent || '';
-                        page.codeType = pageContent.codeType || 'mermaid';
                     }
                     
                     // Apply Google page link data when type matches or content has embedUrl/driveFileId
@@ -2951,7 +2950,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '2.9.61',
+            version: appVersion || '2.9.65',
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

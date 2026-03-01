@@ -6,7 +6,7 @@ import { MERMAID_MIN_SCALE, MERMAID_MAX_SCALE, MERMAID_ZOOM_STEP, PYODIDE_URL } 
 import { Star, Edit3, X, ZoomIn, ZoomOut, Maximize2 } from '../icons';
 
 // Helper functions
-const getCode = (p) => (p.code ?? p.mermaidCode ?? '').trim();
+const getCode = (p) => (p.code ?? p.mermaidCode ?? p.codeContent ?? '').trim();
 const getCodeType = (p) => p.codeType || 'mermaid';
 
 // Pyodide loading utilities
@@ -117,7 +117,7 @@ const MermaidPageComponent = ({
   const hasDiagram = isMermaidWithContent && !mermaidError;
 
   const openCodeEdit = () => {
-    setCodeEditValue(page.code ?? page.mermaidCode ?? '');
+    setCodeEditValue(page.code ?? page.mermaidCode ?? page.codeContent ?? '');
     setCodeEditType(getCodeType(page));
     setShowCodeEdit(true);
     setIframeError(null);

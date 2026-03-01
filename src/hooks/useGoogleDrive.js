@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { APP_VERSION, DEBUG_SYNC } from '../lib/constants';
 import * as GoogleAPI from '../lib/google-api';
 import { generateOfflineViewerHtml } from '../lib/offline-viewer';
-import { cleanupOrphans } from '../lib/reconciler';
+import { cleanupOrphans, reconcileData } from '../lib/reconciler';
 
 /**
  * Hook for managing Google Drive authentication and sync
@@ -532,27 +532,29 @@ export function useGoogleDrive(data, setData, showNotification) {
       
       if (driveData && driveData.notebooks) {
         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: loaded from Drive', { notebookCount: driveData.notebooks.length });
+        const reconciled = reconcileData(driveData);
         // Set data BEFORE driveRootFolderId so structure sync runs with Drive data, not INITIAL_DATA
-        setData(driveData);
+        setData(reconciled);
         setDriveRootFolderId(rootFolderId);
         // Cache the data
         if (cacheKey) {
-          const cacheEntry = { data: driveData, timestamp: Date.now() };
+          const cacheEntry = { data: reconciled, timestamp: Date.now() };
           try {
             sessionStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
             localStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
           } catch (e) { /* quota or disabled */ }
         }
         setHasInitialLoadCompleted(true);
-        return driveData;
+        return reconciled;
       }
       
       if (cached?.data) {
         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: using cached data', { notebookCount: cached.data.notebooks?.length });
-        setData(cached.data);
+        const reconciled = reconcileData(cached.data);
+        setData(reconciled);
         setDriveRootFolderId(rootFolderId);
         setHasInitialLoadCompleted(true);
-        return cached.data;
+        return reconciled;
       }
       
       if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: Drive empty or failed');

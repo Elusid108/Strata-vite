@@ -57,7 +57,8 @@ export const createCodePage = (name = 'Code Page') => {
     icon: '</>',
     codeType: 'mermaid',
     code: '',
-    mermaidCode: ''
+    mermaidCode: '',
+    mermaidViewport: { x: 0, y: 0, scale: 1 }
   };
 };
 

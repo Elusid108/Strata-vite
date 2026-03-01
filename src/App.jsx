@@ -1509,13 +1509,31 @@ function App() {
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => handleFavoriteDrop(e, page.id)}
                     onClick={() => {
+                      flushAndClearSync();
                       localStorage.setItem(`strata_history_nb_${page.notebookId}`, page.tabId);
                       localStorage.setItem(`strata_history_tab_${page.tabId}`, page.id);
-                      selectNotebook(page.notebookId);
-                      setTimeout(() => {
-                        selectTab(page.tabId);
-                        setTimeout(() => selectPage(page.id), 50);
-                      }, 50);
+                      setActiveNotebookId(page.notebookId);
+                      setActiveTabId(page.tabId);
+                      setActivePageId(page.id);
+                      setEditingPageId(null);
+                      setEditingTabId(null);
+                      setEditingNotebookId(null);
+                      if (page.embedUrl) {
+                        setViewedEmbedPages(prev => new Set([...prev, page.id]));
+                      }
+
+                      setData(prev => ({
+                        ...prev,
+                        notebooks: prev.notebooks.map(nb =>
+                          nb.id === page.notebookId ? {
+                            ...nb,
+                            activeTabId: page.tabId,
+                            tabs: nb.tabs.map(t =>
+                              t.id === page.tabId ? { ...t, activePageId: page.id } : t
+                            )
+                          } : nb
+                        )
+                      }));
                     }}
                     className={`flex items-center ${settings.condensedView ? 'justify-center' : 'gap-2'} px-4 py-1 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700`}
                     title={settings.condensedView ? page.name : undefined}

@@ -6,6 +6,7 @@ import {
   EMOJIS, 
   BLOCK_TYPES, 
   INITIAL_DATA,
+  DEBUG_SYNC,
   DRIVE_LOGO_URL,
   DRIVE_SERVICE_ICONS
 } from './lib/constants';
@@ -226,10 +227,11 @@ function App() {
         try {
           const driveData = await loadFromDrive();
           if (driveData?.notebooks?.length > 0) {
+            if (DEBUG_SYNC) console.log('[Strata Sync] loadData: using Drive data', { notebookCount: driveData.notebooks.length });
             setData(driveData);
             setActiveFromData(driveData);
           } else {
-            // Empty Drive = fresh account, use initial data
+            if (DEBUG_SYNC) console.log('[Strata Sync] loadData: Drive empty, using INITIAL_DATA');
             setData(INITIAL_DATA);
             setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
             setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
@@ -238,12 +240,13 @@ function App() {
         } catch (error) {
           console.error('Error loading from Drive:', error);
           showNotification('Failed to load from Drive. Using local data as fallback.', 'error');
-          // Fallback to localStorage only on Drive failure
+          if (DEBUG_SYNC) console.log('[Strata Sync] loadData: Drive failed, fallback to localStorage');
           const localData = loadFromLocalStorage();
           if (localData?.notebooks?.length > 0) {
             setData(localData);
             setActiveFromData(localData);
           } else {
+            if (DEBUG_SYNC) console.log('[Strata Sync] loadData: localStorage empty, using INITIAL_DATA');
             setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
             setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
             setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);
@@ -253,9 +256,11 @@ function App() {
         // Not signed in -- localStorage fallback
         const localData = loadFromLocalStorage();
         if (localData?.notebooks?.length > 0) {
+          if (DEBUG_SYNC) console.log('[Strata Sync] loadData: not signed in, using localStorage', { notebookCount: localData.notebooks.length });
           setData(localData);
           setActiveFromData(localData);
         } else {
+          if (DEBUG_SYNC) console.log('[Strata Sync] loadData: not signed in, localStorage empty, using INITIAL_DATA');
           setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
           setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
           setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);

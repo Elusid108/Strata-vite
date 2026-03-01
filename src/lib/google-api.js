@@ -18,6 +18,7 @@
 // Handles authentication, Drive API operations, and Picker integration
 
 import { CLIENT_ID, API_KEY, SCOPES } from './config';
+import { DEBUG_SYNC } from './constants';
 
 /**
  * @typedef {Object} StrataNode
@@ -640,6 +641,7 @@ const saveFileIdempotent = async (fileId, name, parentId, content, properties = 
                         body: form
                     });
                     
+                    if (DEBUG_SYNC) console.log('[Strata Sync] saveFileIdempotent: updated by fileId', { name: sanitizedName, fileId });
                     return fileId;
                 }
             } catch (e) {
@@ -682,6 +684,7 @@ const saveFileIdempotent = async (fileId, name, parentId, content, properties = 
                 body: form
             });
             
+            if (DEBUG_SYNC) console.log('[Strata Sync] saveFileIdempotent: updated by search', { name: sanitizedName, existingFileId });
             return existingFileId;
         }
         
@@ -718,6 +721,7 @@ const saveFileIdempotent = async (fileId, name, parentId, content, properties = 
         }
         
         const result = await response.json();
+        if (DEBUG_SYNC) console.log('[Strata Sync] saveFileIdempotent: created new', { name: sanitizedName, fileId: result.id });
         return result.id;
     } catch (error) {
         console.error('Error in saveFileIdempotent:', error);
@@ -1303,6 +1307,7 @@ const savePageFile = async (page, tabFolderId) => {
         
         const fileName = sanitizeFileName(page.name) + '.json';
         const contentToSave = (page.content && page.content.version === TREE_VER) ? page.content : (page.rows || page.content);
+        if (DEBUG_SYNC) console.log('[Strata Sync] savePageFile: start', { pageName: page.name, driveFileId: page.driveFileId, hasContent: !!(contentToSave && (Array.isArray(contentToSave) ? contentToSave.length : contentToSave.children?.length)) });
         const pageContent = {
             type: page.type || 'block',
             name: page.name,
@@ -1346,6 +1351,7 @@ const savePageFile = async (page, tabFolderId) => {
             properties
         );
         
+        if (DEBUG_SYNC) console.log('[Strata Sync] savePageFile: complete', { pageName: page.name, fileId });
         return fileId;
     } catch (error) {
         console.error('Error saving page file:', error);
@@ -1885,6 +1891,7 @@ const apiTreeToRows = (tree) => {
 const loadFromDriveStructure = async (rootFolderId) => {
     try {
         await ensureAuthenticated();
+        if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDriveStructure: start', { rootFolderId });
         
         // Load index file for sort order
         const indexData = await getIndexFile(rootFolderId);
@@ -1917,6 +1924,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
             notebooks.push(notebook);
             notebookMap.set(folder.id, notebook);
         }
+        if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDriveStructure: notebook folders', { count: notebooks.length, names: notebooks.map(n => n.name), hasIndex: !!indexData });
         
         // Apply sort order from index
         if (notebookOrder.length > 0) {
@@ -2056,7 +2064,10 @@ const loadFromDriveStructure = async (rootFolderId) => {
                 }));
                 
                 for (const { page, pageContent } of results) {
-                    if (!pageContent) continue;
+                    if (!pageContent) {
+                        if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDriveStructure: batch fetch null content', { pageName: page.name });
+                        continue;
+                    }
                     
                     // Derive page type from content when file properties lack it (fix for existing link files)
                     const googleTypes = ['doc', 'sheet', 'slide', 'pdf', 'drive'];
@@ -2127,6 +2138,8 @@ const loadFromDriveStructure = async (rootFolderId) => {
             }
         }
         
+        const totalPages = notebooks.reduce((sum, nb) => sum + nb.tabs.reduce((s, t) => s + t.pages.length, 0), 0);
+        if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDriveStructure: complete', { notebookCount: notebooks.length, totalPages });
         return {
             notebooks: notebooks
         };
@@ -2937,7 +2950,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '2.2.0',
+            version: appVersion || '2.9.1',
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

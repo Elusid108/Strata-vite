@@ -176,6 +176,7 @@ function App() {
     handleSignOut,
     loadFromDrive,
     triggerStructureSync,
+    triggerContentSync,
     syncRenameToDrive,
     queueDriveDelete
   } = useGoogleDrive(data, setData, showNotification);
@@ -226,10 +227,16 @@ function App() {
         // Drive is the single source of truth -- always load from Drive
         try {
           const driveData = await loadFromDrive();
-          if (driveData?.notebooks?.length > 0) {
+          if (driveData && driveData.notebooks) {
             if (DEBUG_SYNC) console.log('[Strata Sync] loadData: using Drive data', { notebookCount: driveData.notebooks.length });
             setData(driveData);
-            setActiveFromData(driveData);
+            if (driveData.notebooks.length > 0) {
+              setActiveFromData(driveData);
+            } else {
+              setActiveNotebookId(null);
+              setActiveTabId(null);
+              setActivePageId(null);
+            }
           } else {
             if (DEBUG_SYNC) console.log('[Strata Sync] loadData: Drive empty, using INITIAL_DATA');
             setData(INITIAL_DATA);
@@ -307,8 +314,9 @@ function App() {
       const { notebookId, tabId, pageId } = activeIdsRef.current;
       if (!d || !pageId || !tabId || !notebookId || !r) return;
       setData(updatePageInData(d, { notebookId, tabId, pageId }, p => ({ ...p, content: r, rows: treeToRows(r) })));
+      triggerContentSync();
     }, 300);
-  }, [setData]);
+  }, [setData, triggerContentSync]);
 
   const flushAndClearSync = useCallback(() => {
     if (syncContentDebounceRef.current) {
@@ -328,10 +336,12 @@ function App() {
       const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({ ...p, content: t, rows: treeToRows(t) }));
       setData(next);
       saveToHistory(next);
+      triggerContentSync();
     } else {
       scheduleSyncToData();
+      triggerContentSync();
     }
-  }, [activePageId, activeTabId, activeNotebookId, data, setData, saveToHistory, scheduleSyncToData]);
+  }, [activePageId, activeTabId, activeNotebookId, data, setData, saveToHistory, scheduleSyncToData, triggerContentSync]);
 
   useEffect(() => { updatePageContentRef.current = updatePageContent; });
 
@@ -1101,7 +1111,8 @@ function App() {
       )
     }));
     setNotebookIconPicker(null);
-  }, [setData]);
+    triggerStructureSync();
+  }, [setData, triggerStructureSync]);
 
   const updateTabIcon = useCallback((tabId, icon) => {
     setData(prev => ({
@@ -1114,7 +1125,8 @@ function App() {
       )
     }));
     setTabIconPicker(null);
-  }, [setData, activeNotebookId]);
+    triggerStructureSync();
+  }, [setData, activeNotebookId, triggerStructureSync]);
 
   const updatePageIcon = useCallback((pageId, icon) => {
     setData(prev => ({
@@ -1132,7 +1144,8 @@ function App() {
       )
     }));
     setPageIconPicker(null);
-  }, [setData, activeNotebookId, activeTabId]);
+    triggerStructureSync();
+  }, [setData, activeNotebookId, activeTabId, triggerStructureSync]);
 
   const updateTabColor = useCallback((tabId, color) => {
     setData(prev => ({
@@ -1145,7 +1158,8 @@ function App() {
       )
     }));
     setActiveTabMenu(null);
-  }, [setData, activeNotebookId]);
+    triggerStructureSync();
+  }, [setData, activeNotebookId, triggerStructureSync]);
 
   // ==================== NAV DRAG AND DROP ====================
   
@@ -1325,17 +1339,20 @@ function App() {
   const handleCanvasUpdate = useCallback((updates) => {
     if (!activePageId || !activeTabId || !activeNotebookId) return;
     setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({ ...p, ...updates })));
-  }, [activePageId, activeTabId, activeNotebookId, setData]);
+    triggerContentSync();
+  }, [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]);
 
   const handleTableUpdate = useCallback((updatedPage) => {
     if (!activePageId || !activeTabId || !activeNotebookId) return;
     setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, () => updatedPage));
-  }, [activePageId, activeTabId, activeNotebookId, setData]);
+    triggerContentSync();
+  }, [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]);
 
   const handleMermaidUpdate = useCallback((updates) => {
     if (!activePageId || !activeTabId || !activeNotebookId) return;
     setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({ ...p, ...updates })));
-  }, [activePageId, activeTabId, activeNotebookId, setData]);
+    triggerContentSync();
+  }, [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]);
 
   // ==================== RENDER ====================
   

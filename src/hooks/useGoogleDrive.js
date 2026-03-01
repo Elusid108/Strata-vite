@@ -240,11 +240,22 @@ export function useGoogleDrive(data, setData, showNotification) {
             // Sync pages
             for (const page of tab.pages) {
               const pageType = page.type || 'block';
-              // Google/embed pages that link to external files (not stored as JSON)
               const isGooglePage = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'map', 'site', 'script', 'drive'].includes(pageType);
               
-              // Skip pages that have an embedUrl (they're external links, not JSON content)
-              if (!isGooglePage && !page.driveFileId && !page.embedUrl) {
+              if (isGooglePage || page.embedUrl) {
+                if (!page.driveLinkFileId) {
+                  try {
+                    const fileId = await GoogleAPI.syncGooglePageLink(page, tabFolderId);
+                    if (!driveIdUpdates[notebook.id]) driveIdUpdates[notebook.id] = { tabs: {} };
+                    if (!driveIdUpdates[notebook.id].tabs) driveIdUpdates[notebook.id].tabs = {};
+                    if (!driveIdUpdates[notebook.id].tabs[tab.id]) driveIdUpdates[notebook.id].tabs[tab.id] = { pages: {} };
+                    if (!driveIdUpdates[notebook.id].tabs[tab.id].pages) driveIdUpdates[notebook.id].tabs[tab.id].pages = {};
+                    driveIdUpdates[notebook.id].tabs[tab.id].pages[page.id] = { driveLinkFileId: fileId };
+                  } catch (error) {
+                    console.error(`Error creating link file for page ${page.name}:`, error);
+                  }
+                }
+              } else if (!page.driveFileId) {
                 try {
                   const fileId = await GoogleAPI.syncPageToDrive(page, tabFolderId);
                   if (!driveIdUpdates[notebook.id]) driveIdUpdates[notebook.id] = { tabs: {} };
@@ -379,6 +390,11 @@ export function useGoogleDrive(data, setData, showNotification) {
     return () => clearTimeout(contentSyncTimeout);
   }, [isAuthenticated, isLoadingAuth, driveRootFolderId, contentSyncVersion]);
 
+  // Trigger content sync
+  const triggerContentSync = useCallback(() => {
+    setContentSyncVersion(v => v + 1);
+  }, []);
+
   // Trigger structure sync
   const triggerStructureSync = useCallback(() => {
     setStructureVersion(v => v + 1);
@@ -420,7 +436,7 @@ export function useGoogleDrive(data, setData, showNotification) {
       // Load from Drive
       const driveData = await GoogleAPI.loadFromDriveStructure(rootFolderId);
       
-      if (driveData && driveData.notebooks && driveData.notebooks.length > 0) {
+      if (driveData && driveData.notebooks) {
         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: loaded from Drive', { notebookCount: driveData.notebooks.length });
         // Set data BEFORE driveRootFolderId so structure sync runs with Drive data, not INITIAL_DATA
         setData(driveData);
@@ -520,6 +536,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     handleSignOut,
     loadFromDrive,
     triggerStructureSync,
+    triggerContentSync,
     syncRenameToDrive,
     queueDriveDelete
   };

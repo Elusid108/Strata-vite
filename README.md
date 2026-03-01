@@ -1,4 +1,4 @@
-# Strata v2.9.1
+# Strata v2.9.2
 
 A hierarchical note-taking and knowledge management application with Google Drive integration, built with React and Vite.
 

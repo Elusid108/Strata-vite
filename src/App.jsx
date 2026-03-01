@@ -1489,9 +1489,9 @@ function App() {
                 <span
                   className={`${settings.condensedView ? 'text-xl' : ''} cursor-pointer hover:opacity-80 notebook-icon-trigger`}
                   onClick={(e) => {
+                    if (settings.condensedView) return;
                     e.stopPropagation();
                     if (activeNotebookId !== notebook.id) return;
-                    if (settings.condensedView) return;
                     const pos = getPickerPosition(e.clientY, e.clientX);
                     setNotebookIconPicker(notebookIconPicker?.id === notebook.id ? null : { id: notebook.id, top: pos.top, left: pos.left });
                   }}
@@ -1568,9 +1568,9 @@ function App() {
                   <span
                     className="cursor-pointer hover:opacity-80 tab-icon-trigger"
                     onClick={(e) => {
+                      if (settings.condensedView) return;
                       e.stopPropagation();
                       if (activeTabId !== tab.id) return;
-                      if (settings.condensedView) return;
                       const pos = getPickerPosition(e.clientY, e.clientX);
                       setTabIconPicker(tabIconPicker?.id === tab.id ? null : { id: tab.id, top: pos.top, left: pos.left });
                     }}
@@ -1636,7 +1636,7 @@ function App() {
                   page={activePage}
                   onUpdate={handleTableUpdate}
                 />
-              ) : activePage.type === 'mermaid' ? (
+              ) : (activePage.type === 'mermaid' || activePage.type === 'code') ? (
                 <MermaidPageComponent
                   page={activePage}
                   onUpdate={handleMermaidUpdate}
@@ -1845,6 +1845,7 @@ function App() {
                     <span
                       className={`${settings.condensedView ? 'text-xl' : 'mr-1 flex-shrink-0'} cursor-pointer hover:opacity-80 page-icon-trigger`}
                       onClick={(e) => {
+                        if (settings.condensedView) return;
                         e.stopPropagation();
                         if (activePageId !== page.id) return;
                         const pos = getPickerPosition(e.clientY, e.clientX);

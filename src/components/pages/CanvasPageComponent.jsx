@@ -40,6 +40,8 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
   const [currentDate] = useState(getFormattedDate());
   const [showIconPicker, setShowIconPicker] = useState(false);
   const iconPickerRef = useRef(null);
+  const isTitleFocused = useRef(false);
+  const onUpdateTimeoutRef = useRef(null);
 
   // Initialize from page data when page changes
   useEffect(() => {
@@ -60,12 +62,12 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     }
   }, [page.id]);
 
-  // Sync pageTitle with page.name when page.name changes externally
+  // Sync pageTitle with page.name when page.name changes externally (skip while user is typing)
   useEffect(() => {
-    if (page.name && page.name !== pageTitle) {
+    if (!isTitleFocused.current && page.name && page.name !== pageTitle) {
       setPageTitle(page.name);
     }
-  }, [page.name]);
+  }, [page.name, pageTitle]);
 
   // Close icon picker when clicking outside
   useEffect(() => {
@@ -79,18 +81,25 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showIconPicker]);
 
-  // Save to page data (including transform)
+  // Save to page data (including transform) - debounced to break update loop and reduce re-renders
   useEffect(() => {
-    onUpdate({ 
-      canvasData: { 
-        containers, 
-        paths, 
-        pageTitle,
-        transform 
-      },
-      name: pageTitle
-    });
-  }, [containers, paths, pageTitle, transform]);
+    if (onUpdateTimeoutRef.current) clearTimeout(onUpdateTimeoutRef.current);
+    onUpdateTimeoutRef.current = setTimeout(() => {
+      onUpdate({ 
+        canvasData: { 
+          containers, 
+          paths, 
+          pageTitle,
+          transform 
+        },
+        name: pageTitle
+      });
+      onUpdateTimeoutRef.current = null;
+    }, 300);
+    return () => {
+      if (onUpdateTimeoutRef.current) clearTimeout(onUpdateTimeoutRef.current);
+    };
+  }, [containers, paths, pageTitle, transform, page.id]);
 
   // History management
   const pushToHistory = () => {
@@ -821,16 +830,12 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
                <div className="flex-1">
                  <input 
                    value={pageTitle}
-                   onChange={(e) => { 
-                     const newTitle = e.target.value;
-                     setPageTitle(newTitle);
-                     onUpdate({ name: newTitle });
-                   }}
+                   onFocus={() => { isTitleFocused.current = true; }}
                    onBlur={() => {
-                     if (pageTitle !== page.name) {
-                       onUpdate({ name: pageTitle });
-                     }
+                     isTitleFocused.current = false;
+                     if (pageTitle !== page.name) onUpdate({ name: pageTitle });
                    }}
+                   onChange={(e) => setPageTitle(e.target.value)}
                    className="text-5xl font-light text-gray-800 dark:text-gray-200 bg-transparent border-none outline-none w-full placeholder-gray-300 dark:placeholder-gray-500"
                    placeholder="Page Title"
                  />

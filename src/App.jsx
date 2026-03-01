@@ -1241,7 +1241,13 @@ function App() {
 
     setData(prev => {
       const next = { ...prev };
-      if (!next.favoritesOrder) return next;
+      if (!next.favoritesOrder) {
+        const currentStars = [];
+        next.notebooks.forEach(nb => nb.tabs.forEach(t => t.pages.forEach(p => {
+          if (p.starred) currentStars.push(p.id);
+        })));
+        next.favoritesOrder = currentStars;
+      }
       const order = [...next.favoritesOrder];
       const fromIdx = order.indexOf(dragData.id);
       const toIdx = order.indexOf(targetPageId);
@@ -1284,8 +1290,8 @@ function App() {
       }
       return next;
     });
-    triggerContentSync(pageId);
-  }, [setData, triggerContentSync]);
+    triggerStructureSync();
+  }, [setData, triggerStructureSync]);
 
   const getStarredPages = useCallback(() => {
     const starred = [];
@@ -1503,6 +1509,8 @@ function App() {
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => handleFavoriteDrop(e, page.id)}
                     onClick={() => {
+                      localStorage.setItem(`strata_history_nb_${page.notebookId}`, page.tabId);
+                      localStorage.setItem(`strata_history_tab_${page.tabId}`, page.id);
                       selectNotebook(page.notebookId);
                       setTimeout(() => {
                         selectTab(page.tabId);
@@ -1514,6 +1522,18 @@ function App() {
                   >
                     <span className={settings.condensedView ? 'text-xl' : ''}>{page.icon || '📄'}</span>
                     {!settings.condensedView && <span className="truncate">{page.name}</span>}
+                    {!settings.condensedView && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleStar(page.id, page.notebookId, page.tabId);
+                        }}
+                        className="text-yellow-400 hover:opacity-80 flex-shrink-0"
+                        title="Remove from favorites"
+                      >
+                        <Star size={14} filled={true} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

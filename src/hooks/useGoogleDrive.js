@@ -29,6 +29,9 @@ export function useGoogleDrive(data, setData, showNotification) {
   // Content sync version for triggering content sync retries
   const [contentSyncVersion, setContentSyncVersion] = useState(0);
   
+  const [hasInitialLoadCompleted, setHasInitialLoadCompleted] = useState(false);
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
+  
   // Sync lock refs
   const syncLockRef = useRef(false);
   const pendingSyncRef = useRef(false);
@@ -39,6 +42,8 @@ export function useGoogleDrive(data, setData, showNotification) {
   
   // Pending content sync flag
   const pendingContentSyncRef = useRef(false);
+  
+  const dirtyPagesRef = useRef(new Set());
   
   // Orphan cleanup -- run once per session
   const orphanCleanupDoneRef = useRef(false);
@@ -175,7 +180,7 @@ export function useGoogleDrive(data, setData, showNotification) {
 
   // Sync folder structure to Drive (uses dataRef to avoid re-running on every data change)
   useEffect(() => {
-    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId) return;
+    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !hasInitialLoadCompleted) return;
     const currentData = dataRef.current;
     if (!currentData?.notebooks) return;
 
@@ -390,6 +395,7 @@ export function useGoogleDrive(data, setData, showNotification) {
         console.error('Error syncing structure:', error);
       } finally {
         setIsSyncing(false);
+        setHasUnsyncedChanges(false);
         syncLockRef.current = false;
         
         if (pendingSyncRef.current) {
@@ -408,11 +414,11 @@ export function useGoogleDrive(data, setData, showNotification) {
     // Reduced delay for faster sync (localStorage provides immediate backup now)
     const syncTimeout = setTimeout(syncStructure, 1000);
     return () => clearTimeout(syncTimeout);
-  }, [structureVersion, isAuthenticated, isLoadingAuth, driveRootFolderId, setData]);
+  }, [structureVersion, isAuthenticated, isLoadingAuth, driveRootFolderId, hasInitialLoadCompleted, setData]);
 
   // Content sync - update page content files (uses dataRef to avoid re-running on every data change)
   useEffect(() => {
-    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId) return;
+    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !hasInitialLoadCompleted) return;
     const currentData = dataRef.current;
     if (!currentData?.notebooks) return;
     
@@ -422,57 +428,69 @@ export function useGoogleDrive(data, setData, showNotification) {
         pendingContentSyncRef.current = true;
         return;
       }
+      setIsSyncing(true);
       if (DEBUG_SYNC) console.log('[Strata Sync] content sync: start');
       
-      const dataToSync = dataRef.current;
-      let pagesSynced = 0;
-      for (const notebook of dataToSync.notebooks) {
-        for (const tab of notebook.tabs) {
-          const tabFolderId = tab.driveFolderId;
-          if (!tabFolderId) continue;
-          
-          for (const page of tab.pages) {
-            const pageType = page.type || 'block';
-            // Google/embed pages that link to external files (not stored as JSON)
-            const isGooglePage = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'map', 'site', 'script', 'drive'].includes(pageType);
+      try {
+        const dataToSync = dataRef.current;
+        let pagesSynced = 0;
+        for (const notebook of dataToSync.notebooks) {
+          for (const tab of notebook.tabs) {
+            const tabFolderId = tab.driveFolderId;
+            if (!tabFolderId) continue;
             
-            // Sync block page content (JSON storage)
-            if (!isGooglePage && page.driveFileId && !page.embedUrl) {
-              try {
-                await GoogleAPI.syncPageToDrive(page, tabFolderId);
-                pagesSynced++;
-              } catch (error) {
-                console.error(`Error updating page content ${page.name}:`, error);
-                if (DEBUG_SYNC) console.log('[Strata Sync] content sync: error', { page: page.name, error: error?.message });
+            for (const page of tab.pages) {
+              const pageType = page.type || 'block';
+              // Google/embed pages that link to external files (not stored as JSON)
+              const isGooglePage = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'map', 'site', 'script', 'drive'].includes(pageType);
+              
+              if (!dirtyPagesRef.current.has(page.id)) continue;
+              
+              // Sync block page content (JSON storage)
+              if (!isGooglePage && page.driveFileId && !page.embedUrl) {
+                try {
+                  await GoogleAPI.syncPageToDrive(page, tabFolderId);
+                  pagesSynced++;
+                } catch (error) {
+                  console.error(`Error updating page content ${page.name}:`, error);
+                  if (DEBUG_SYNC) console.log('[Strata Sync] content sync: error', { page: page.name, error: error?.message });
+                }
               }
-            }
-            // Sync Google/embed page link (embedUrl, webViewLink) when edit/preview mode changes
-            else if (isGooglePage || page.embedUrl) {
-              try {
-                await GoogleAPI.syncGooglePageLink(page, tabFolderId);
-                pagesSynced++;
-              } catch (error) {
-                console.error(`Error syncing Google page link ${page.name}:`, error);
+              // Sync Google/embed page link (embedUrl, webViewLink) when edit/preview mode changes
+              else if (isGooglePage || page.embedUrl) {
+                try {
+                  await GoogleAPI.syncGooglePageLink(page, tabFolderId);
+                  pagesSynced++;
+                } catch (error) {
+                  console.error(`Error syncing Google page link ${page.name}:`, error);
+                }
               }
             }
           }
         }
+        dirtyPagesRef.current.clear();
+        lastContentSyncRef.current = Date.now();
+        if (DEBUG_SYNC) console.log('[Strata Sync] content sync: complete', { pagesSynced });
+      } finally {
+        setIsSyncing(false);
+        setHasUnsyncedChanges(false);
       }
-      lastContentSyncRef.current = Date.now();
-      if (DEBUG_SYNC) console.log('[Strata Sync] content sync: complete', { pagesSynced });
     };
 
-    const contentSyncTimeout = setTimeout(syncContent, 10000);
+    const contentSyncTimeout = setTimeout(syncContent, 2000);
     return () => clearTimeout(contentSyncTimeout);
-  }, [isAuthenticated, isLoadingAuth, driveRootFolderId, contentSyncVersion]);
+  }, [isAuthenticated, isLoadingAuth, driveRootFolderId, hasInitialLoadCompleted, contentSyncVersion]);
 
   // Trigger content sync
-  const triggerContentSync = useCallback(() => {
+  const triggerContentSync = useCallback((pageId) => {
+    if (pageId) dirtyPagesRef.current.add(pageId);
+    setHasUnsyncedChanges(true);
     setContentSyncVersion(v => v + 1);
   }, []);
 
   // Trigger structure sync
   const triggerStructureSync = useCallback(() => {
+    setHasUnsyncedChanges(true);
     setStructureVersion(v => v + 1);
   }, []);
 
@@ -525,6 +543,7 @@ export function useGoogleDrive(data, setData, showNotification) {
             localStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
           } catch (e) { /* quota or disabled */ }
         }
+        setHasInitialLoadCompleted(true);
         return driveData;
       }
       
@@ -532,17 +551,20 @@ export function useGoogleDrive(data, setData, showNotification) {
         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: using cached data', { notebookCount: cached.data.notebooks?.length });
         setData(cached.data);
         setDriveRootFolderId(rootFolderId);
+        setHasInitialLoadCompleted(true);
         return cached.data;
       }
       
       if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: Drive empty or failed');
       setDriveRootFolderId(rootFolderId);
+      setHasInitialLoadCompleted(true);
       return null;
     } catch (error) {
       console.error('Error loading from Drive:', error);
       if (error.message?.includes('Authentication')) {
         showNotification?.('Authentication expired. Please sign in again.', 'error');
       }
+      setHasInitialLoadCompleted(true);
       return null;
     }
   }, [isAuthenticated, isLoadingAuth, userEmail, showNotification, setData]);
@@ -595,6 +617,17 @@ export function useGoogleDrive(data, setData, showNotification) {
     }
   }, [isAuthenticated, data, triggerStructureSync]);
 
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasUnsyncedChanges) {
+        e.preventDefault();
+        e.returnValue = 'You have unsynced changes. Please wait for sync to finish.';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsyncedChanges]);
+
   return {
     // Auth state
     isAuthenticated,
@@ -606,6 +639,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     driveRootFolderId,
     isSyncing,
     lastSyncTime,
+    hasUnsyncedChanges,
     
     // Actions
     handleSignIn,

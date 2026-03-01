@@ -172,6 +172,7 @@ function App() {
     userName,
     driveRootFolderId,
     isSyncing,
+    hasUnsyncedChanges,
     handleSignIn,
     handleSignOut,
     loadFromDrive,
@@ -209,17 +210,21 @@ function App() {
     const loadData = async () => {
       if (isLoadingAuth) return;
 
-      // Helper to set active IDs from data
+      // Helper to set active IDs from data (restores last viewed from localStorage)
       const setActiveFromData = (loadedData) => {
         if (!loadedData?.notebooks?.length) return false;
-        const firstNb = loadedData.notebooks[0];
-        setActiveNotebookId(firstNb.id);
-        const tabId = firstNb.activeTabId || firstNb.tabs[0]?.id;
-        setActiveTabId(tabId);
-        if (tabId) {
-          const tab = firstNb.tabs.find(t => t.id === tabId);
-          if (tab) setActivePageId(tab.activePageId || tab.pages[0]?.id);
-        }
+        let tgtNb, tgtTab, tgtPg;
+        try {
+          const last = JSON.parse(localStorage.getItem('strata_last_view'));
+          if (last) { tgtNb = last.activeNotebookId; tgtTab = last.activeTabId; tgtPg = last.activePageId; }
+        } catch (e) {}
+
+        const nb = loadedData.notebooks.find(n => n.id === tgtNb) || loadedData.notebooks[0];
+        setActiveNotebookId(nb.id);
+        const tab = nb.tabs.find(t => t.id === tgtTab) || nb.tabs.find(t => t.id === nb.activeTabId) || nb.tabs[0];
+        setActiveTabId(tab?.id || null);
+        const page = tab?.pages.find(p => p.id === tgtPg) || tab?.pages.find(p => p.id === tab.activePageId) || tab?.pages[0];
+        setActivePageId(page?.id || null);
         return true;
       };
 
@@ -240,9 +245,7 @@ function App() {
           } else {
             if (DEBUG_SYNC) console.log('[Strata Sync] loadData: Drive empty, using INITIAL_DATA');
             setData(INITIAL_DATA);
-            setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
-            setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
-            setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);
+            setActiveFromData(INITIAL_DATA);
           }
         } catch (error) {
           console.error('Error loading from Drive:', error);
@@ -254,9 +257,8 @@ function App() {
             setActiveFromData(localData);
           } else {
             if (DEBUG_SYNC) console.log('[Strata Sync] loadData: localStorage empty, using INITIAL_DATA');
-            setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
-            setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
-            setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);
+            setData(INITIAL_DATA);
+            setActiveFromData(INITIAL_DATA);
           }
         }
       } else {
@@ -268,15 +270,20 @@ function App() {
           setActiveFromData(localData);
         } else {
           if (DEBUG_SYNC) console.log('[Strata Sync] loadData: not signed in, localStorage empty, using INITIAL_DATA');
-          setActiveNotebookId(INITIAL_DATA.notebooks[0].id);
-          setActiveTabId(INITIAL_DATA.notebooks[0].tabs[0].id);
-          setActivePageId(INITIAL_DATA.notebooks[0].tabs[0].pages[0].id);
+          setData(INITIAL_DATA);
+          setActiveFromData(INITIAL_DATA);
         }
       }
     };
 
     loadData();
   }, [isAuthenticated, isLoadingAuth]);
+
+  useEffect(() => {
+    if (activeNotebookId && activeTabId && activePageId) {
+      localStorage.setItem('strata_last_view', JSON.stringify({ activeNotebookId, activeTabId, activePageId }));
+    }
+  }, [activeNotebookId, activeTabId, activePageId]);
 
   // ==================== PAGE CONTENT SYNC ====================
   
@@ -314,7 +321,7 @@ function App() {
       const { notebookId, tabId, pageId } = activeIdsRef.current;
       if (!d || !pageId || !tabId || !notebookId || !r) return;
       setData(updatePageInData(d, { notebookId, tabId, pageId }, p => ({ ...p, content: r, rows: treeToRows(r) })));
-      triggerContentSync();
+      triggerContentSync(pageId);
     }, 300);
   }, [setData, triggerContentSync]);
 
@@ -336,10 +343,10 @@ function App() {
       const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({ ...p, content: t, rows: treeToRows(t) }));
       setData(next);
       saveToHistory(next);
-      triggerContentSync();
+      triggerContentSync(activePageId);
     } else {
       scheduleSyncToData();
-      triggerContentSync();
+      triggerContentSync(activePageId);
     }
   }, [activePageId, activeTabId, activeNotebookId, data, setData, saveToHistory, scheduleSyncToData, triggerContentSync]);
 
@@ -430,7 +437,7 @@ function App() {
     }
     if (syncContentDebounceRef.current) { clearTimeout(syncContentDebounceRef.current); syncContentDebounceRef.current = null; }
     scheduleSyncToData();
-    triggerContentSync();
+    triggerContentSync(activeIdsRef.current.pageId);
   }, [scheduleSyncToData, setData, triggerContentSync]);
 
   const handleRemoveBlock = useCallback((blockId) => {
@@ -1341,19 +1348,19 @@ function App() {
   const handleCanvasUpdate = useCallback((updates) => {
     if (!activePageId || !activeTabId || !activeNotebookId) return;
     setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({ ...p, ...updates })));
-    triggerContentSync();
+    triggerContentSync(activePageId);
   }, [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]);
 
   const handleTableUpdate = useCallback((updatedPage) => {
     if (!activePageId || !activeTabId || !activeNotebookId) return;
     setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, () => updatedPage));
-    triggerContentSync();
+    triggerContentSync(activePageId);
   }, [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]);
 
   const handleMermaidUpdate = useCallback((updates) => {
     if (!activePageId || !activeTabId || !activeNotebookId) return;
     setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({ ...p, ...updates })));
-    triggerContentSync();
+    triggerContentSync(activePageId);
   }, [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]);
 
   // ==================== RENDER ====================
@@ -1387,7 +1394,13 @@ function App() {
           {isLoadingAuth ? (
             <div className="text-xs text-gray-500 text-center py-2">Loading...</div>
           ) : isAuthenticated ? (
-            <div className={`flex items-center ${settings.condensedView ? 'justify-center' : 'gap-2'} p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer`} onClick={() => setShowSignOutConfirm(true)} title={settings.condensedView ? `${userName} (${userEmail})` : undefined}>
+            <div className={`flex items-center ${settings.condensedView ? 'justify-center' : 'gap-2'} p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer`} onClick={() => {
+              if (hasUnsyncedChanges) {
+                showNotification('Please wait for sync to finish before signing out.', 'error');
+                return;
+              }
+              setShowSignOutConfirm(true);
+            }} title={settings.condensedView ? `${userName} (${userEmail})` : undefined}>
               <GoogleG size={16} />
               {!settings.condensedView && (
                 <div className="flex-1 min-w-0">
@@ -1650,7 +1663,7 @@ function App() {
                         }
                       )
                     }));
-                    triggerContentSync();
+                    triggerContentSync(activePageId);
                   }}
                   onToggleStar={() => toggleStar(activePage.id, activeNotebookId, activeTabId)}
                   onEditUrl={() => {

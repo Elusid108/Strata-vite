@@ -1,5 +1,5 @@
 // --- App Version ---
-export const APP_VERSION = "2.9.4";
+export const APP_VERSION = "2.9.5";
 
 // --- Debug ---
 export const DEBUG_SYNC = import.meta.env.VITE_STRATA_DEBUG_SYNC === 'true';
@@ -127,10 +127,10 @@ export const INITIAL_DATA = {
                   id: 'row1', columns: [
                     {
                       id: 'col1', blocks: [
-                        { id: 'blk1', type: 'h1', content: 'Welcome to your new Note App!' },
-                        { id: 'blk2', type: 'text', content: 'Try <b>bolding</b> or <i>italicizing</i> this text using standard keyboard shortcuts.' },
-                        { id: 'blk3', type: 'text', content: 'Type / to see available commands like /h1, /img, etc.' },
-                        { id: 'blk4', type: 'text', content: 'Use the slash menu for images, videos, links, and more.' }
+                        { id: 'blk1', type: 'h1', content: 'Welcome to Strata Sandbox!' },
+                        { id: 'blk2', type: 'text', content: '<b>⚠️ Notice:</b> This is a temporary sandbox environment. Any changes made here will be wiped upon login.' },
+                        { id: 'blk3', type: 'text', content: 'Please <b>Sign in with Google</b> on the left to create your persistent workspace.' },
+                        { id: 'blk4', type: 'text', content: 'Feel free to experiment with blocks, dragging, and formatting before signing in!' }
                       ]
                     }
                   ]

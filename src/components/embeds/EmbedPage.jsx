@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getEmbedUrlForType } from '../../lib/embed-utils';
 import { EmbedToolbar } from './EmbedToolbar';
 import { GoogleDocEmbed } from './GoogleDocEmbed';
 import { GoogleFormEmbed } from './GoogleFormEmbed';
@@ -35,14 +36,20 @@ export function EmbedPage({
     } else {
       setViewMode('edit');
     }
-  }, [page?.id]);
+  }, [page?.id, page?.viewMode, page?.embedUrl]);
   
   // Handle view mode change
   const handleViewModeChange = (mode) => {
     setViewMode(mode);
-    // Optionally persist to page data
     if (onUpdate) {
-      onUpdate({ viewMode: mode });
+      const embedUrl = (page?.driveFileId && ['doc', 'sheet', 'slide'].includes(page?.type))
+        ? getEmbedUrlForType(page.type, page.driveFileId, mode)
+        : (mode === 'preview' && page?.embedUrl?.includes('/edit'))
+          ? page.embedUrl.replace('/edit', '/preview')
+          : (mode === 'edit' && page?.embedUrl?.includes('/preview'))
+            ? page.embedUrl.replace('/preview', '/edit')
+            : page?.embedUrl;
+      onUpdate({ viewMode: mode, ...(embedUrl && { embedUrl }) });
     }
   };
   

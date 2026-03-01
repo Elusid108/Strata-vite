@@ -1211,7 +1211,8 @@ function App() {
       }
     }
     setData(newData);
-  }, [saveToHistory, data, setData, activeNotebookId, activeTabId]);
+    triggerStructureSync();
+  }, [saveToHistory, data, setData, activeNotebookId, activeTabId, triggerStructureSync]);
 
   // ==================== STAR/FAVORITES ====================
   
@@ -1635,10 +1636,10 @@ function App() {
                   onUpdate={(updates) => {
                     setData(prev => ({
                       ...prev,
-                      notebooks: prev.notebooks.map(nb => 
+                      notebooks: prev.notebooks.map(nb =>
                         nb.id !== activeNotebookId ? nb : {
                           ...nb,
-                          tabs: nb.tabs.map(tab => 
+                          tabs: nb.tabs.map(tab =>
                             tab.id !== activeTabId ? tab : {
                               ...tab,
                               pages: tab.pages.map(p =>
@@ -1649,6 +1650,7 @@ function App() {
                         }
                       )
                     }));
+                    triggerContentSync();
                   }}
                   onToggleStar={() => toggleStar(activePage.id, activeNotebookId, activeTabId)}
                   onEditUrl={() => {

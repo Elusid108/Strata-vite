@@ -209,32 +209,48 @@ export function useGoogleDrive(data, setData, showNotification) {
 
         // Sync each notebook
         for (const notebook of dataToSync.notebooks) {
+          let notebookFolderId;
           if (!notebook.driveFolderId) {
             try {
-              const folderId = await GoogleAPI.getOrCreateFolder(notebook.name, driveRootFolderId);
-              driveIdUpdates[notebook.id] = { driveFolderId: folderId };
+              notebookFolderId = await GoogleAPI.getOrCreateFolder(notebook.name, driveRootFolderId);
+              driveIdUpdates[notebook.id] = { driveFolderId: notebookFolderId };
             } catch (error) {
               console.error(`Error creating folder for notebook ${notebook.name}:`, error);
+              continue;
+            }
+          } else {
+            try {
+              notebookFolderId = await GoogleAPI.saveFolderIdempotent(notebook.driveFolderId, notebook.name, driveRootFolderId, { icon: notebook.icon });
+            } catch (error) {
+              console.error(`Error updating notebook folder ${notebook.name}:`, error);
+              notebookFolderId = notebook.driveFolderId;
             }
           }
 
-          const notebookFolderId = notebook.driveFolderId || driveIdUpdates[notebook.id]?.driveFolderId;
           if (!notebookFolderId) continue;
 
           // Sync tabs
           for (const tab of notebook.tabs) {
+            let tabFolderId;
             if (!tab.driveFolderId) {
               try {
-                const folderId = await GoogleAPI.getOrCreateFolder(tab.name, notebookFolderId);
+                tabFolderId = await GoogleAPI.getOrCreateFolder(tab.name, notebookFolderId);
                 if (!driveIdUpdates[notebook.id]) driveIdUpdates[notebook.id] = { tabs: {} };
                 if (!driveIdUpdates[notebook.id].tabs) driveIdUpdates[notebook.id].tabs = {};
-                driveIdUpdates[notebook.id].tabs[tab.id] = { driveFolderId: folderId };
+                driveIdUpdates[notebook.id].tabs[tab.id] = { driveFolderId: tabFolderId };
               } catch (error) {
                 console.error(`Error creating folder for tab ${tab.name}:`, error);
+                continue;
+              }
+            } else {
+              try {
+                tabFolderId = await GoogleAPI.saveFolderIdempotent(tab.driveFolderId, tab.name, notebookFolderId, { icon: tab.icon, tabColor: tab.color });
+              } catch (error) {
+                console.error(`Error updating tab folder ${tab.name}:`, error);
+                tabFolderId = tab.driveFolderId;
               }
             }
 
-            const tabFolderId = tab.driveFolderId || driveIdUpdates[notebook.id]?.tabs?.[tab.id]?.driveFolderId;
             if (!tabFolderId) continue;
 
             // Sync pages
@@ -254,6 +270,12 @@ export function useGoogleDrive(data, setData, showNotification) {
                   } catch (error) {
                     console.error(`Error creating link file for page ${page.name}:`, error);
                   }
+                } else {
+                  try {
+                    await GoogleAPI.updateFileProperties(page.driveLinkFileId, { icon: page.icon, pageType: pageType });
+                  } catch (error) {
+                    console.error(`Error updating page properties ${page.name}:`, error);
+                  }
                 }
               } else if (!page.driveFileId) {
                 try {
@@ -265,6 +287,12 @@ export function useGoogleDrive(data, setData, showNotification) {
                   driveIdUpdates[notebook.id].tabs[tab.id].pages[page.id] = { driveFileId: fileId };
                 } catch (error) {
                   console.error(`Error creating file for page ${page.name}:`, error);
+                }
+              } else {
+                try {
+                  await GoogleAPI.updateFileProperties(page.driveFileId, { icon: page.icon, pageType: pageType });
+                } catch (error) {
+                  console.error(`Error updating page properties ${page.name}:`, error);
                 }
               }
             }
@@ -306,6 +334,45 @@ export function useGoogleDrive(data, setData, showNotification) {
             })};
             return next;
           });
+        }
+
+        // Build index data (use Drive IDs for order - survives reload when app IDs are regenerated)
+        const mergedNotebooks = dataToSync.notebooks.map(nb => {
+          const nbUpdate = driveIdUpdates[nb.id];
+          return {
+            driveFolderId: nbUpdate?.driveFolderId || nb.driveFolderId,
+            tabs: nb.tabs.map(tab => {
+              const tabUpdate = nbUpdate?.tabs?.[tab.id];
+              return {
+                driveFolderId: tabUpdate?.driveFolderId || tab.driveFolderId,
+                pages: tab.pages.map(page => {
+                  const pageUpdate = tabUpdate?.pages?.[page.id];
+                  return pageUpdate?.driveFileId || pageUpdate?.driveLinkFileId || page.driveFileId || page.driveLinkFileId;
+                }).filter(Boolean)
+              };
+            })
+          };
+        });
+        const indexData = {
+          notebooks: mergedNotebooks.map(nb => nb.driveFolderId).filter(Boolean),
+          tabs: {},
+          pages: {}
+        };
+        for (const nb of mergedNotebooks) {
+          if (nb.driveFolderId) {
+            indexData.tabs[nb.driveFolderId] = nb.tabs.map(t => t.driveFolderId).filter(Boolean);
+            for (const tab of nb.tabs) {
+              if (tab.driveFolderId && tab.pages.length > 0) {
+                indexData.pages[tab.driveFolderId] = tab.pages;
+              }
+            }
+          }
+        }
+        try {
+          await GoogleAPI.saveIndexFile(driveRootFolderId, indexData);
+          if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: strata_index.json saved');
+        } catch (error) {
+          console.error('Error saving strata_index.json:', error);
         }
         
         // Update manifest.json and index.html (use dataRef for latest structure)
@@ -369,7 +436,7 @@ export function useGoogleDrive(data, setData, showNotification) {
             // Google/embed pages that link to external files (not stored as JSON)
             const isGooglePage = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'map', 'site', 'script', 'drive'].includes(pageType);
             
-            // Only sync content for non-Google pages that have a driveFileId (JSON storage)
+            // Sync block page content (JSON storage)
             if (!isGooglePage && page.driveFileId && !page.embedUrl) {
               try {
                 await GoogleAPI.syncPageToDrive(page, tabFolderId);
@@ -377,6 +444,15 @@ export function useGoogleDrive(data, setData, showNotification) {
               } catch (error) {
                 console.error(`Error updating page content ${page.name}:`, error);
                 if (DEBUG_SYNC) console.log('[Strata Sync] content sync: error', { page: page.name, error: error?.message });
+              }
+            }
+            // Sync Google/embed page link (embedUrl, webViewLink) when edit/preview mode changes
+            else if (isGooglePage || page.embedUrl) {
+              try {
+                await GoogleAPI.syncGooglePageLink(page, tabFolderId);
+                pagesSynced++;
+              } catch (error) {
+                console.error(`Error syncing Google page link ${page.name}:`, error);
               }
             }
           }

@@ -1926,18 +1926,18 @@ const loadFromDriveStructure = async (rootFolderId) => {
         }
         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDriveStructure: notebook folders', { count: notebooks.length, names: notebooks.map(n => n.name), hasIndex: !!indexData });
         
-        // Apply sort order from index
+        // Apply sort order from index (index uses Drive IDs for matching across reloads)
         if (notebookOrder.length > 0) {
             const orderedNotebooks = [];
             const unorderedNotebooks = [];
             
-            for (const nbId of notebookOrder) {
-                const nb = notebooks.find(n => n.id === nbId);
+            for (const driveFolderId of notebookOrder) {
+                const nb = notebooks.find(n => n.driveFolderId === driveFolderId);
                 if (nb) orderedNotebooks.push(nb);
             }
             
             for (const nb of notebooks) {
-                if (!notebookOrder.includes(nb.id)) {
+                if (!notebookOrder.includes(nb.driveFolderId)) {
                     unorderedNotebooks.push(nb);
                 }
             }
@@ -1973,19 +1973,19 @@ const loadFromDriveStructure = async (rootFolderId) => {
                 tabMap.set(folder.id, tab);
             }
             
-            // Apply sort order from index
-            const tabOrderForNotebook = tabOrder[notebook.id] || [];
+            // Apply sort order from index (keyed by notebook driveFolderId)
+            const tabOrderForNotebook = tabOrder[notebook.driveFolderId] || [];
             if (tabOrderForNotebook.length > 0) {
                 const orderedTabs = [];
                 const unorderedTabs = [];
                 
-                for (const tabId of tabOrderForNotebook) {
-                    const tab = tabs.find(t => t.id === tabId);
+                for (const tabDriveFolderId of tabOrderForNotebook) {
+                    const tab = tabs.find(t => t.driveFolderId === tabDriveFolderId);
                     if (tab) orderedTabs.push(tab);
                 }
                 
                 for (const tab of tabs) {
-                    if (!tabOrderForNotebook.includes(tab.id)) {
+                    if (!tabOrderForNotebook.includes(tab.driveFolderId)) {
                         unorderedTabs.push(tab);
                     }
                 }
@@ -2114,19 +2114,20 @@ const loadFromDriveStructure = async (rootFolderId) => {
                 }
             }
             
-            // Apply sort order from index for each tab
+            // Apply sort order from index for each tab (keyed by tab driveFolderId, page Drive file IDs)
             for (const tab of tabs) {
-                const pageOrderForTab = pageOrder[tab.id] || [];
+                const pageOrderForTab = pageOrder[tab.driveFolderId] || [];
                 const pages = tab.pages;
                 if (pageOrderForTab.length > 0 && pages.length > 0) {
                     const orderedPages = [];
                     const unorderedPages = [];
-                    for (const pageId of pageOrderForTab) {
-                        const page = pages.find(p => p.id === pageId);
+                    for (const pageDriveFileId of pageOrderForTab) {
+                        const page = pages.find(p => (p.driveFileId || p.driveLinkFileId) === pageDriveFileId);
                         if (page) orderedPages.push(page);
                     }
                     for (const page of pages) {
-                        if (!pageOrderForTab.includes(page.id)) {
+                        const pageFileId = page.driveFileId || page.driveLinkFileId;
+                        if (!pageOrderForTab.includes(pageFileId)) {
                             unorderedPages.push(page);
                         }
                     }
@@ -2950,7 +2951,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '2.9.2',
+            version: appVersion || '2.9.3',
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

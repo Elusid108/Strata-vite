@@ -1870,6 +1870,8 @@ function App() {
                                         onDrop={handleDrop}
                                         dropTarget={dropTarget}
                                         isLastBlock={totalBlocks === 1}
+                                        isAuthenticated={isAuthenticated}
+                                        GoogleAPI={GoogleAPI}
                                       />
                                     ))}
                                   </div>

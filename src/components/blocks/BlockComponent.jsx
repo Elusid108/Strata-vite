@@ -8,9 +8,7 @@ import { GripVertical, LinkIcon, ChevronRight } from '../icons';
 import { ImageLightbox } from '../ui';
 import ContentBlock from './ContentBlock';
 import ListBlock from './ListBlock';
-
-// Note: MapBlock will be added in Section F
-// For now, we'll render a placeholder for map blocks
+import MapBlock from '../pages/MapBlock';
 
 const BlockComponent = memo(({ 
   block, 
@@ -245,13 +243,10 @@ const BlockComponent = memo(({
 
           {block.type === 'map' && (
             <div className="space-y-2" data-block-id={block.id}>
-              {/* MapBlock will be added in Section F */}
-              <div className="bg-gray-100 dark:bg-gray-700 p-8 rounded text-center border-2 border-dashed border-gray-300 dark:border-gray-500">
-                <p className="text-gray-500 dark:text-gray-400">Map component (Section F)</p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Center: {block.mapData?.center?.[0]?.toFixed(4)}, {block.mapData?.center?.[1]?.toFixed(4)}
-                </p>
-              </div>
+              <MapBlock
+                data={block.mapData}
+                onUpdate={(mapData) => onUpdate(block.id, { mapData })}
+              />
             </div>
           )}
 

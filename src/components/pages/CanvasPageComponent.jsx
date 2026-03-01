@@ -37,6 +37,7 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
   const [resizeInfo, setResizeInfo] = useState(null);
   const [drawInfo, setDrawInfo] = useState(null);
   const canvasRef = useRef(null);
+  const rafRef = useRef(null);
   const [currentDate] = useState(getFormattedDate());
   const [showIconPicker, setShowIconPicker] = useState(false);
   const iconPickerRef = useRef(null);
@@ -313,7 +314,13 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     const newX = mouseX + canvasOffset - canvasPointX * newScale;
     const newY = mouseY + canvasOffset - canvasPointY * newScale;
 
-    setTransform({ x: newX, y: newY, scale: newScale });
+    transformRef.current = { x: newX, y: newY, scale: newScale };
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        setTransform(transformRef.current);
+        rafRef.current = null;
+      });
+    }
   }, []);
 
   // Attach wheel event listener with non-passive option to allow preventDefault
@@ -436,11 +443,17 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     if (dragInfo && dragInfo.type === 'pan') {
       const dx = e.clientX - dragInfo.startX;
       const dy = e.clientY - dragInfo.startY;
-      setTransform({
+      transformRef.current = {
         ...transform,
         x: dragInfo.initialTransform.x + dx,
         y: dragInfo.initialTransform.y + dy
-      });
+      };
+      if (!rafRef.current) {
+        rafRef.current = requestAnimationFrame(() => {
+          setTransform(transformRef.current);
+          rafRef.current = null;
+        });
+      }
       return;
     }
 

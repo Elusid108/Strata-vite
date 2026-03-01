@@ -611,11 +611,13 @@ function App() {
     setEditingPageId(null);
     setEditingTabId(null);
     setEditingNotebookId(null);
-    const targetTabId = nb.activeTabId || (nb.tabs && nb.tabs[0] ? nb.tabs[0].id : null);
+    const lastTabId = localStorage.getItem(`strata_history_nb_${notebookId}`);
+    const targetTabId = lastTabId && nb.tabs.some(t => t.id === lastTabId) ? lastTabId : (nb.activeTabId || (nb.tabs && nb.tabs[0] ? nb.tabs[0].id : null));
     setActiveTabId(targetTabId);
     if (targetTabId) {
       const tab = nb.tabs.find(t => t.id === targetTabId);
-      setActivePageId(tab ? (tab.activePageId || (tab.pages && tab.pages[0] ? tab.pages[0].id : null)) : null);
+      const lastPageId = localStorage.getItem(`strata_history_tab_${targetTabId}`);
+      setActivePageId(lastPageId && tab.pages.some(p => p.id === lastPageId) ? lastPageId : (tab.activePageId || (tab.pages && tab.pages[0] ? tab.pages[0].id : null)));
     } else {
       setActivePageId(null);
     }
@@ -624,6 +626,7 @@ function App() {
   const selectTab = useCallback((tabId) => {
     flushAndClearSync();
     setActiveTabId(tabId);
+    localStorage.setItem('strata_history_nb_' + activeNotebookId, tabId);
     setEditingPageId(null);
     setEditingTabId(null);
     setEditingNotebookId(null);
@@ -636,13 +639,15 @@ function App() {
     const nb = data.notebooks.find(n => n.id === activeNotebookId);
     const tab = nb?.tabs.find(t => t.id === tabId);
     if (tab) {
-      setActivePageId(tab.activePageId || (tab.pages && tab.pages[0] ? tab.pages[0].id : null));
+      const lastPageId = localStorage.getItem(`strata_history_tab_${tabId}`);
+      setActivePageId(lastPageId && tab.pages.some(p => p.id === lastPageId) ? lastPageId : (tab.activePageId || (tab.pages && tab.pages[0] ? tab.pages[0].id : null)));
     }
   }, [flushAndClearSync, setData, activeNotebookId, data.notebooks]);
 
   const selectPage = useCallback((pageId) => {
     flushAndClearSync();
     setActivePageId(pageId);
+    localStorage.setItem('strata_history_tab_' + activeTabId, pageId);
     setEditingPageId(null);
     setEditingTabId(null);
     setEditingNotebookId(null);
@@ -1227,25 +1232,58 @@ function App() {
     triggerStructureSync();
   }, [saveToHistory, data, setData, activeNotebookId, activeTabId, triggerStructureSync]);
 
+  const handleFavoriteDrop = useCallback((e, targetPageId) => {
+    e.preventDefault(); e.stopPropagation();
+    const dragDataRaw = e.dataTransfer.getData('nav_drag');
+    if (!dragDataRaw) return;
+    const dragData = JSON.parse(dragDataRaw);
+    if (dragData.type !== 'favorite' || dragData.id === targetPageId) return;
+
+    setData(prev => {
+      const next = { ...prev };
+      if (!next.favoritesOrder) return next;
+      const order = [...next.favoritesOrder];
+      const fromIdx = order.indexOf(dragData.id);
+      const toIdx = order.indexOf(targetPageId);
+      if (fromIdx > -1 && toIdx > -1) {
+        order.splice(fromIdx, 1);
+        order.splice(toIdx, 0, dragData.id);
+        next.favoritesOrder = order;
+      }
+      return next;
+    });
+    triggerStructureSync();
+  }, [setData, triggerStructureSync]);
+
   // ==================== STAR/FAVORITES ====================
   
   const toggleStar = useCallback((pageId, notebookId, tabId) => {
-    setData(prev => ({
-      ...prev,
-      notebooks: prev.notebooks.map(nb => 
-        nb.id !== notebookId ? nb : {
-          ...nb,
-          tabs: nb.tabs.map(t => 
-            t.id !== tabId ? t : {
-              ...t,
-              pages: t.pages.map(p => 
-                p.id === pageId ? { ...p, starred: !p.starred } : p
-              )
-            }
-          )
-        }
-      )
-    }));
+    setData(prev => {
+      const next = {
+        ...prev,
+        notebooks: prev.notebooks.map(nb => 
+          nb.id !== notebookId ? nb : {
+            ...nb,
+            tabs: nb.tabs.map(t => 
+              t.id !== tabId ? t : {
+                ...t,
+                pages: t.pages.map(p => 
+                  p.id === pageId ? { ...p, starred: !p.starred } : p
+                )
+              }
+            )
+          }
+        )
+      };
+      if (!next.favoritesOrder) next.favoritesOrder = [];
+      const isNowStarred = next.notebooks.find(n => n.id === notebookId)?.tabs.find(t => t.id === tabId)?.pages.find(p => p.id === pageId)?.starred;
+      if (isNowStarred && !next.favoritesOrder.includes(pageId)) {
+        next.favoritesOrder = [...next.favoritesOrder, pageId];
+      } else if (!isNowStarred) {
+        next.favoritesOrder = next.favoritesOrder.filter(id => id !== pageId);
+      }
+      return next;
+    });
     triggerContentSync(pageId);
   }, [setData, triggerContentSync]);
 
@@ -1266,8 +1304,18 @@ function App() {
         });
       });
     });
+    if (data.favoritesOrder) {
+      starred.sort((a, b) => {
+        const idxA = data.favoritesOrder.indexOf(a.id);
+        const idxB = data.favoritesOrder.indexOf(b.id);
+        if (idxA === -1 && idxB === -1) return 0;
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+      });
+    }
     return starred;
-  }, [data.notebooks]);
+  }, [data.notebooks, data.favoritesOrder]);
 
   // ==================== BLOCK TYPE CHANGE ====================
   
@@ -1450,6 +1498,10 @@ function App() {
                 {starredPages.map(page => (
                   <div
                     key={page.id}
+                    draggable={true}
+                    onDragStart={(e) => handleNavDragStart(e, 'favorite', page.id, 0)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => handleFavoriteDrop(e, page.id)}
                     onClick={() => {
                       selectNotebook(page.notebookId);
                       setTimeout(() => {
@@ -1629,79 +1681,92 @@ function App() {
         {/* CONTENT AREA */}
         <div className="flex-1 flex overflow-hidden">
           {/* Main Content */}
-          <div className="flex-1 overflow-auto">
-            {activePage ? (
-              activePage.type === 'canvas' ? (
-                <CanvasPageComponent
-                  page={activePage}
-                  onUpdate={handleCanvasUpdate}
-                  saveToHistory={saveToHistory}
-                  showNotification={showNotification}
-                />
-              ) : activePage.type === 'database' ? (
-                <TablePage
-                  page={activePage}
-                  onUpdate={handleTableUpdate}
-                />
-              ) : (activePage.type === 'mermaid' || activePage.type === 'code') ? (
-                <MermaidPageComponent
-                  page={activePage}
-                  onUpdate={handleMermaidUpdate}
-                  saveToHistory={saveToHistory}
-                  showNotification={showNotification}
-                />
-              ) : activePage.embedUrl ? (
-                <EmbedPage
-                  page={activePage}
-                  onUpdate={(updates) => {
-                    setData(prev => ({
-                      ...prev,
-                      notebooks: prev.notebooks.map(nb =>
-                        nb.id !== activeNotebookId ? nb : {
-                          ...nb,
-                          tabs: nb.tabs.map(tab =>
-                            tab.id !== activeTabId ? tab : {
-                              ...tab,
-                              pages: tab.pages.map(p =>
-                                p.id === activePage.id ? { ...p, ...updates } : p
-                              )
-                            }
-                          )
-                        }
-                      )
-                    }));
-                    triggerContentSync(activePageId);
-                  }}
-                  onToggleStar={() => toggleStar(activePage.id, activeNotebookId, activeTabId)}
-                  onEditUrl={() => {
-                    setEditEmbedName(activePage.name);
-                    setEditEmbedUrl(activePage.originalUrl || activePage.embedUrl);
-                    setShowEditEmbed(true);
-                  }}
-                  isStarred={activePage.starred}
-                />
-              ) : ['doc','sheet','slide','form','drawing','vid','pdf','site','script','drive'].includes(activePage.type) ? (
-                // Embed-type page missing its embed URL - show reconnect message
-                <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-500 dark:text-gray-400 p-8">
-                  <div className="text-6xl">{activePage.icon || '📄'}</div>
-                  <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300">{activePage.name}</h2>
-                  <p className="text-center max-w-md">
-                    This {activePage.type === 'doc' ? 'Google Doc' : 
-                          activePage.type === 'sheet' ? 'Google Sheet' :
-                          activePage.type === 'slide' ? 'Google Slides' :
-                          activePage.type === 'form' ? 'Google Form' :
-                          activePage.type === 'drawing' ? 'Google Drawing' :
-                          activePage.type === 'vid' ? 'Google Video' :
-                          activePage.type === 'pdf' ? 'PDF' :
-                          'embedded file'} needs to be re-linked.
-                    The original file reference was lost during sync.
-                  </p>
-                  <p className="text-sm text-gray-400">
-                    Delete this page and add a new one using the Drive URL option.
-                  </p>
+          <div className="flex-1 relative bg-gray-100 dark:bg-gray-900">
+            {/* Layer 1: Background embed pages (preserve iframe state when switching) */}
+            {Array.from(viewedEmbedPages).map(pageId => {
+              let p = null, nbId, tId;
+              data.notebooks.forEach(nb => nb.tabs.forEach(t => t.pages.forEach(pg => { if (pg.id === pageId) { p = pg; nbId = nb.id; tId = t.id; } })));
+              if (!p || !p.embedUrl) return null;
+              return (
+                <div key={pageId} className="absolute inset-0 z-10" style={{ display: activePageId === pageId ? 'block' : 'none' }}>
+                  <EmbedPage
+                    page={p}
+                    onUpdate={(updates) => {
+                      setData(prev => ({
+                        ...prev,
+                        notebooks: prev.notebooks.map(nb =>
+                          nb.id !== nbId ? nb : {
+                            ...nb,
+                            tabs: nb.tabs.map(tab =>
+                              tab.id !== tId ? tab : {
+                                ...tab,
+                                pages: tab.pages.map(pg =>
+                                  pg.id === pageId ? { ...pg, ...updates } : pg
+                                )
+                              }
+                            )
+                          }
+                        )
+                      }));
+                      triggerContentSync(pageId);
+                    }}
+                    onToggleStar={() => toggleStar(p.id, nbId, tId)}
+                    onEditUrl={() => {
+                      setEditEmbedName(p.name);
+                      setEditEmbedUrl(p.originalUrl || p.embedUrl);
+                      setShowEditEmbed(true);
+                    }}
+                    isStarred={p.starred}
+                  />
                 </div>
-              ) : (
-                // Block page
+              );
+            })}
+
+            {/* Layer 2: Non-embed content (Canvas, Database, Mermaid, Block, reconnect) */}
+            {activePage && !activePage.embedUrl && (
+              <div className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-800">
+                {activePage.type === 'canvas' ? (
+                  <CanvasPageComponent
+                    page={activePage}
+                    onUpdate={handleCanvasUpdate}
+                    saveToHistory={saveToHistory}
+                    showNotification={showNotification}
+                  />
+                ) : activePage.type === 'database' ? (
+                  <TablePage
+                    page={activePage}
+                    onUpdate={handleTableUpdate}
+                  />
+                ) : (activePage.type === 'mermaid' || activePage.type === 'code') ? (
+                  <MermaidPageComponent
+                    page={activePage}
+                    onUpdate={handleMermaidUpdate}
+                    saveToHistory={saveToHistory}
+                    showNotification={showNotification}
+                  />
+                ) : ['doc','sheet','slide','form','drawing','vid','pdf','site','script','drive'].includes(activePage.type) ? (
+                  // Embed-type page missing its embed URL - show reconnect message
+                  <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-500 dark:text-gray-400 p-8">
+                    <div className="text-6xl">{activePage.icon || '📄'}</div>
+                    <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300">{activePage.name}</h2>
+                    <p className="text-center max-w-md">
+                      This {activePage.type === 'doc' ? 'Google Doc' : 
+                            activePage.type === 'sheet' ? 'Google Sheet' :
+                            activePage.type === 'slide' ? 'Google Slides' :
+                            activePage.type === 'form' ? 'Google Form' :
+                            activePage.type === 'drawing' ? 'Google Drawing' :
+                            activePage.type === 'vid' ? 'Google Video' :
+                            activePage.type === 'pdf' ? 'PDF' :
+                            'embedded file'} needs to be re-linked.
+                      The original file reference was lost during sync.
+                    </p>
+                    <p className="text-sm text-gray-400">
+                      Delete this page and add a new one using the Drive URL option.
+                    </p>
+                  </div>
+                ) : (
+                <>
+                {/* Block page */}
                 <div className="min-h-full bg-gray-100 dark:bg-gray-900 p-4">
                   <div className="max-w-4xl mx-auto min-h-[500px] bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden pb-10">
                       {/* Page Header */}
@@ -1787,9 +1852,14 @@ function App() {
                       </div>
                   </div>
                 </div>
-              )
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-3 text-gray-400">
+                </>
+              )}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!activePage && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 text-gray-400">
                 <Book size={48} className="opacity-50" />
                 <p className="text-sm font-medium">Select a page</p>
                 <p className="text-xs text-gray-500">Choose a page from the list</p>

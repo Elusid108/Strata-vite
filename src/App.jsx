@@ -38,6 +38,7 @@ import {
   createDatabasePage 
 } from './lib/page-factories';
 import * as GoogleAPI from './lib/google-api';
+import * as emoji from 'node-emoji';
 
 // Icons
 import {
@@ -102,6 +103,7 @@ function App() {
   const [notebookIconPicker, setNotebookIconPicker] = useState(null);
   const [tabIconPicker, setTabIconPicker] = useState(null);
   const [pageIconPicker, setPageIconPicker] = useState(null);
+  const [iconSearchTerm, setIconSearchTerm] = useState('');
   
   // Drag hover states
   const [dragHoverTarget, setDragHoverTarget] = useState(null);
@@ -367,9 +369,9 @@ function App() {
       if (editingPageId && !e.target.closest('.page-input')) setEditingPageId(null);
       if (!e.target.closest('.icon-picker-trigger') && !e.target.closest('.icon-picker')) setShowIconPicker(false);
       if (!e.target.closest('.cover-input-trigger') && !e.target.closest('.cover-input')) setShowCoverInput(false);
-      if (!e.target.closest('.notebook-icon-trigger') && !e.target.closest('.notebook-icon-picker')) setNotebookIconPicker(null);
-      if (!e.target.closest('.tab-icon-trigger') && !e.target.closest('.tab-icon-picker')) setTabIconPicker(null);
-      if (!e.target.closest('.page-icon-trigger') && !e.target.closest('.page-icon-picker')) setPageIconPicker(null);
+      if (!e.target.closest('.notebook-icon-trigger') && !e.target.closest('.notebook-icon-picker')) { setNotebookIconPicker(null); setIconSearchTerm(''); }
+      if (!e.target.closest('.tab-icon-trigger') && !e.target.closest('.tab-icon-picker')) { setTabIconPicker(null); setIconSearchTerm(''); }
+      if (!e.target.closest('.page-icon-trigger') && !e.target.closest('.page-icon-picker')) { setPageIconPicker(null); setIconSearchTerm(''); }
       if (!e.target.closest('.settings-modal') && !e.target.closest('.settings-trigger')) setShowSettings(false);
       if (!e.target.closest('.page-type-menu') && !e.target.closest('.page-type-trigger')) setShowPageTypeMenu(false);
     };
@@ -1119,6 +1121,7 @@ function App() {
       )
     }));
     setNotebookIconPicker(null);
+    setIconSearchTerm('');
     triggerStructureSync();
   }, [setData, triggerStructureSync]);
 
@@ -1133,6 +1136,7 @@ function App() {
       )
     }));
     setTabIconPicker(null);
+    setIconSearchTerm('');
     triggerStructureSync();
   }, [setData, activeNotebookId, triggerStructureSync]);
 
@@ -1152,6 +1156,7 @@ function App() {
       )
     }));
     setPageIconPicker(null);
+    setIconSearchTerm('');
     triggerStructureSync();
   }, [setData, activeNotebookId, activeTabId, triggerStructureSync]);
 
@@ -1353,7 +1358,7 @@ function App() {
 
   const handleTableUpdate = useCallback((updatedPage) => {
     if (!activePageId || !activeTabId || !activeNotebookId) return;
-    setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, () => updatedPage));
+    setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({ ...p, ...updatedPage })));
     triggerContentSync(activePageId);
   }, [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]);
 
@@ -1704,7 +1709,7 @@ function App() {
                       <div className="px-8 py-8">
                         <div className="flex items-center gap-4 mb-6">
                           <span
-                            className="text-4xl cursor-pointer hover:opacity-80 icon-picker-trigger"
+                            className="text-4xl cursor-pointer hover:opacity-80 page-icon-trigger"
                             onClick={(e) => {
                               const pos = getPickerPosition(e.clientY, e.clientX);
                               setPageIconPicker(pageIconPicker?.pageId === activePage.id ? null : { pageId: activePage.id, top: pos.top, left: pos.left });
@@ -2009,57 +2014,93 @@ function App() {
       {/* Icon Pickers */}
       {notebookIconPicker && (
         <div 
-          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] notebook-icon-picker w-64 h-64 overflow-y-auto"
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] notebook-icon-picker w-64"
           style={{ top: notebookIconPicker.top, left: notebookIconPicker.left }}
         >
-          <div className="grid grid-cols-5 gap-1">
-            {EMOJIS.slice(0, 100).map((emoji, i) => (
-              <div
-                key={i}
-                className="text-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded text-center"
-                onClick={() => updateNotebookIcon(notebookIconPicker.id, emoji)}
-              >
-                {emoji}
-              </div>
-            ))}
+          <input
+            type="text"
+            placeholder="Search icons..."
+            value={iconSearchTerm}
+            onChange={(e) => setIconSearchTerm(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="w-full mb-2 p-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-700 dark:text-white outline-none"
+            autoFocus
+          />
+          <div className="h-64 overflow-y-auto">
+            <div className="grid grid-cols-5 gap-1">
+              {(iconSearchTerm.trim() ? (emoji.search(iconSearchTerm) || []).map(r => r.emoji) : EMOJIS).map((em, i) => (
+                <div
+                  key={i}
+                  className="text-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded text-center"
+                  onClick={() => updateNotebookIcon(notebookIconPicker.id, em)}
+                >
+                  {em}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {tabIconPicker && (
         <div 
-          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] tab-icon-picker w-64 h-64 overflow-y-auto"
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] tab-icon-picker w-64"
           style={{ top: tabIconPicker.top, left: tabIconPicker.left }}
         >
-          <div className="grid grid-cols-5 gap-1">
-            {EMOJIS.slice(0, 100).map((emoji, i) => (
-              <div
-                key={i}
-                className="text-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded text-center"
-                onClick={() => updateTabIcon(tabIconPicker.id, emoji)}
-              >
-                {emoji}
-              </div>
-            ))}
+          <input
+            type="text"
+            placeholder="Search icons..."
+            value={iconSearchTerm}
+            onChange={(e) => setIconSearchTerm(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="w-full mb-2 p-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-700 dark:text-white outline-none"
+            autoFocus
+          />
+          <div className="h-64 overflow-y-auto">
+            <div className="grid grid-cols-5 gap-1">
+              {(iconSearchTerm.trim() ? (emoji.search(iconSearchTerm) || []).map(r => r.emoji) : EMOJIS).map((em, i) => (
+                <div
+                  key={i}
+                  className="text-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded text-center"
+                  onClick={() => updateTabIcon(tabIconPicker.id, em)}
+                >
+                  {em}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {pageIconPicker && (
         <div 
-          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] page-icon-picker w-64 h-64 overflow-y-auto"
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] page-icon-picker w-64"
           style={{ top: pageIconPicker.top, left: pageIconPicker.left }}
         >
-          <div className="grid grid-cols-5 gap-1">
-            {EMOJIS.slice(0, 100).map((emoji, i) => (
-              <div
-                key={i}
-                className="text-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded text-center"
-                onClick={() => updatePageIcon(pageIconPicker.pageId, emoji)}
-              >
-                {emoji}
-              </div>
-            ))}
+          <input
+            type="text"
+            placeholder="Search icons..."
+            value={iconSearchTerm}
+            onChange={(e) => setIconSearchTerm(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="w-full mb-2 p-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-700 dark:text-white outline-none"
+            autoFocus
+          />
+          <div className="h-64 overflow-y-auto">
+            <div className="grid grid-cols-5 gap-1">
+              {(iconSearchTerm.trim() ? (emoji.search(iconSearchTerm) || []).map(r => r.emoji) : EMOJIS).map((em, i) => (
+                <div
+                  key={i}
+                  className="text-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded text-center"
+                  onClick={() => updatePageIcon(pageIconPicker.pageId, em)}
+                >
+                  {em}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

@@ -342,7 +342,7 @@ const sanitizeFileName = (name) => {
     if (!name) return 'Untitled';
     // Remove/replace characters that are invalid in filenames
     return name
-        .replace(/[<>:"/\\|?*]/g, '-')  // Replace invalid chars with dash
+        .replace(/[<>:"/\\|*]/g, '-')  // Replace invalid chars with dash
         .replace(/\s+/g, ' ')            // Normalize whitespace
         .replace(/^\.+/, '')             // Remove leading dots
         .replace(/\.+$/, '')             // Remove trailing dots
@@ -1317,7 +1317,8 @@ const savePageFile = async (page, tabFolderId) => {
             googleFileId: page.googleFileId,
             url: page.url,
             createdAt: page.createdAt,
-            modifiedAt: Date.now()
+            modifiedAt: Date.now(),
+            starred: page.starred || false
         };
         
         // Add page-type-specific content
@@ -2087,6 +2088,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
                     page.url = pageContent.url;
                     page.createdAt = pageContent.createdAt || page.createdAt;
                     page.modifiedAt = pageContent.modifiedAt || page.modifiedAt;
+                    page.starred = pageContent.starred || false;
                     
                     if (pageType === 'mermaid' || pageType === 'code') {
                         const codeVal = pageContent.code ?? pageContent.codeContent ?? pageContent.mermaidCode ?? '';

@@ -573,9 +573,11 @@ export function useGoogleDrive(data, setData, showNotification) {
 
   // Sync rename to Drive
   const syncRenameToDrive = useCallback(async (type, id) => {
-    if (!isAuthenticated || !data) return;
+    if (!isAuthenticated) return;
+    const currentData = dataRef.current;
+    if (!currentData?.notebooks) return;
     
-    for (const nb of data.notebooks) {
+    for (const nb of currentData.notebooks) {
       if (type === 'notebook' && nb.id === id && nb.driveFolderId) {
         try {
           await GoogleAPI.renameDriveItem(nb.driveFolderId, GoogleAPI.sanitizeFileName(nb.name));
@@ -611,13 +613,14 @@ export function useGoogleDrive(data, setData, showNotification) {
                 console.error('Error updating page shortcut:', err);
               }
             }
+            triggerContentSync(id);
             triggerStructureSync();
             return;
           }
         }
       }
     }
-  }, [isAuthenticated, data, triggerStructureSync]);
+  }, [isAuthenticated, triggerStructureSync, triggerContentSync]);
 
   useEffect(() => {
     const handleBeforeUnload = (e) => {

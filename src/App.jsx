@@ -1246,7 +1246,8 @@ function App() {
         }
       )
     }));
-  }, [setData]);
+    triggerContentSync(pageId);
+  }, [setData, triggerContentSync]);
 
   const getStarredPages = useCallback(() => {
     const starred = [];
@@ -1444,7 +1445,7 @@ function App() {
                 </>
               )}
             </button>
-            {favoritesExpanded && !settings.condensedView && (
+            {favoritesExpanded && (
               <div className="pb-2">
                 {starredPages.map(page => (
                   <div
@@ -1456,10 +1457,11 @@ function App() {
                         setTimeout(() => selectPage(page.id), 50);
                       }, 50);
                     }}
-                    className="flex items-center gap-2 px-4 py-1 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700"
+                    className={`flex items-center ${settings.condensedView ? 'justify-center' : 'gap-2'} px-4 py-1 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700`}
+                    title={settings.condensedView ? page.name : undefined}
                   >
-                    <span>{page.icon || '📄'}</span>
-                    <span className="truncate">{page.name}</span>
+                    <span className={settings.condensedView ? 'text-xl' : ''}>{page.icon || '📄'}</span>
+                    {!settings.condensedView && <span className="truncate">{page.name}</span>}
                   </div>
                 ))}
               </div>
@@ -2221,6 +2223,14 @@ function App() {
               >
                 Done
               </button>
+              <a
+                href="https://chrismoore.me"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-center text-sm text-gray-500 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 mt-3 transition-colors"
+              >
+                chrismoore.me
+              </a>
             </div>
           </div>
         </div>

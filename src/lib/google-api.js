@@ -264,8 +264,8 @@ const checkAuthStatus = async () => {
                     return null;
                 }
             } else {
-                // Token expired, clear storage
-                signOut();
+                // Token expired - don't signOut; let handleTokenExpiration attempt silent refresh
+                return null;
             }
         }
 
@@ -2169,6 +2169,7 @@ const syncGooglePageLink = async (page, tabFolderId) => {
             embedUrl: page.embedUrl,
             webViewLink: page.webViewLink,
             driveFileId: page.driveFileId, // The linked Google file ID
+            starred: page.starred || false,
             createdAt: page.createdAt,
             modifiedAt: Date.now()
         };

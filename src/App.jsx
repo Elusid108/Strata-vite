@@ -1726,7 +1726,7 @@ function App() {
               data.notebooks.forEach(nb => nb.tabs.forEach(t => t.pages.forEach(pg => { if (pg.id === pageId) { p = pg; nbId = nb.id; tId = t.id; } })));
               if (!p || !p.embedUrl) return null;
               return (
-                <div key={pageId} className="absolute inset-0 z-10" style={{ display: activePageId === pageId ? 'block' : 'none' }}>
+                <div key={pageId} className="absolute inset-0" style={{ visibility: activePageId === pageId ? 'visible' : 'hidden', opacity: activePageId === pageId ? 1 : 0, pointerEvents: activePageId === pageId ? 'auto' : 'none', zIndex: activePageId === pageId ? 10 : -1 }}>
                   <EmbedPage
                     page={p}
                     onUpdate={(updates) => {

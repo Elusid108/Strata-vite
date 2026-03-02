@@ -1,125 +1,111 @@
-# Strata v2.9.95
+# 🗂️ Strata
 
-A hierarchical note-taking and knowledge management application with Google Drive integration, built with React and Vite.
+**A highly flexible, privacy-first workspace that uses your personal Google Drive as its backend.** Strata is a block-based note-taking and productivity app designed for speed, organization, and absolute data ownership. Unlike traditional cloud apps that store your data on proprietary servers, Strata runs entirely in your browser and syncs directly to a hidden folder in your Google Drive. Zero tracking, zero middle-men—your data is your data.
 
-## Features
+Created by **Chris Moore Designs LLC**.
 
-- **Nested Notebooks/Tabs/Pages** - Organize content in a flexible tree structure
-- **Rich Content Blocks** - Headings, lists, todos, images, videos, links, and dividers via slash commands
-- **Google Drive Integration** - Embed Google Docs, Sheets, Slides, Drawings, and Forms directly in pages
-- **Google Drive as Source of Truth** - Drive data loads on sign-in; all local changes sync back to Drive
-- **Interactive Maps** - Embed Leaflet maps with markers and configuration
-- **Mermaid Diagrams** - Create flowcharts, sequence diagrams, and more
-- **Canvas Pages** - Freeform layout pages
-- **Table/Database Pages** - Structured data views
-- **Dark Mode** - Full light/dark theme support
+---
 
-## Tech Stack
+## ✨ Key Features
 
-- **React** 19.1.0
-- **Vite** 7.2.4
-- **Tailwind CSS** 4.1.18
-- **Leaflet** - Interactive maps
-- **Mermaid** - Diagram rendering
-- **Google Drive API** - Cloud storage and file embedding
+### 🏗️ Deep Organization
+* **Hierarchy:** Structure your life using a nested system of **Notebooks > Tabs > Pages**.
+* **Drag & Drop:** Fully sortable navigation. Rearrange your notebooks, tabs, pages, and favorites on the fly.
+* **Customization:** Personalize your workspace with searchable custom icons and tab colors.
+* **Persistent State:** Strata remembers exactly where you left off. Switching between notebooks instantly restores your last viewed tab and page.
 
-## Prerequisites
+### 📄 Powerful Page Types
+* **Block Pages:** A Notion-style editor featuring text, headings, lists, interactive checkboxes, blockquotes, and image blocks.
+* **Canvas Pages:** An infinite, hardware-accelerated whiteboard for spatial organization and mind-mapping. 
+* **Code Pages:** Built-in HTML/CSS/JS sandbox. Write custom code and preview the live app directly within your notebook.
+* **Table Pages:** Database-style grids for structured data tracking.
+* **Mermaid Pages:** Generate complex flowcharts and diagrams using simple text syntax.
+* **Map Pages:** Interactive geographic maps with custom pins, locked views, and spatial data tracking.
 
-- [Node.js](https://nodejs.org/) (v18 or later recommended)
-- npm (included with Node.js)
-- A Google Cloud project with Drive API enabled (see [SETUP.md](SETUP.md))
+### 🔗 Deep Google Drive Integration
+* **Native Embeds:** Embed Google Docs, Sheets, Slides, Forms, Drawings, Videos, and PDFs directly into your notebooks.
+* **Background Tabs:** Embedded pages remain alive in the background when navigating away, ensuring instant load times and preserved state (like switching Chrome tabs) when you return.
+* **Drive File Blocks:** Link directly to Drive files within your block pages, displaying real-time file names, types, and open/remove controls.
 
-## Quick Start
+### 🔒 Privacy & Performance
+* **100% Client-Side:** No external databases. No analytics. No tracking cookies. 
+* **Drive Sync Engine:** Your data is saved as lightweight `.json` files in your personal Google Drive. 
+* **Smart Syncing:** Features granular "dirty page" tracking to ensure only modified content is uploaded, keeping syncs blazing fast.
+* **Offline Fallback:** Cached local storage ensures you don't lose data if your connection drops.
 
-1. **Clone the repository**
+---
 
+## 🚀 Getting Started
+
+### Prerequisites
+* [Node.js](https://nodejs.org/) (v16 or higher recommended)
+* A Google Cloud Console project with the **Google Drive API** and **Google Picker API** enabled.
+
+### Installation
+
+1. **Clone the repository:**
    ```bash
-   git clone <your-repo-url>
-   cd Strata-vite
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables**
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Edit `.env` and add your Google API credentials. See [SETUP.md](SETUP.md) for detailed instructions on obtaining these credentials.
-
-4. **Start the development server**
-
-   ```bash
-   npm run dev
-   ```
-
-   The app will be available at `http://localhost:5175`.
-
-5. **Build for production**
-
-   ```bash
-   npm run build
-   ```
-
-## Security
-
-This project uses [git-secrets](https://github.com/awslabs/git-secrets) to prevent accidental commits of API keys and other sensitive data. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions.
-
-**Important:** Never commit `.env` files containing real credentials. The `.env` file is excluded from version control via `.gitignore`. Use `.env.example` as a template.
-
-## Project Structure
+   git clone [https://github.com/Elusid108/strata-vite.git](https://github.com/Elusid108/strata-vite.git)
+   cd strata-vite
 
 ```
-Strata-vite/
-├── public/                  # Static assets
-├── src/
-│   ├── components/
-│   │   ├── blocks/          # Content block components
-│   │   ├── embeds/          # Google Drive embed components
-│   │   ├── icons/           # Icon components
-│   │   ├── pages/           # Page type components (canvas, table, map, mermaid)
-│   │   └── ui/              # Shared UI components
-│   ├── hooks/               # Custom React hooks
-│   ├── lib/                 # Utilities and configuration
-│   │   ├── config.js        # Environment variable configuration
-│   │   ├── constants.js     # App constants and definitions
-│   │   ├── google-api.js    # Google Drive API integration
-│   │   ├── tree-operations.js  # Tree data structure operations
-│   │   └── utils.js         # General utilities
-│   ├── App.jsx              # Main application component
-│   ├── main.jsx             # Entry point
-│   └── index.css            # Global styles
-├── .env.example             # Environment variable template
-├── .git-secrets-patterns    # Custom patterns for git-secrets
-├── CONTRIBUTING.md          # Contribution and security guidelines
-├── SETUP.md                 # Detailed environment setup guide
-├── package.json
-└── vite.config.js
+
+2. **Install dependencies:**
+```bash
+npm install
+
 ```
 
-## Changelog
 
-### v2.9.0
-- **Drive-first sync overhaul** -- Google Drive is now the single source of truth; on sign-in, Drive data always loads and overwrites local state
-- **Fixed Google API script loading race condition** -- `loadGapi` and `initGoogleAuth` now poll for async scripts instead of failing instantly
-- **Delete propagation to Drive** -- deleting notebooks, tabs, or pages locally now trashes the corresponding Drive files/folders
-- **Content sync reliability** -- content syncs blocked by the structure sync lock are now retried instead of silently dropped
-- **Orphan cleanup** -- wired in background reconciler that detects and moves orphan Drive items to `_STRATA_TRASH` after sign-in
+3. **Configure Environment Variables:**
+Copy the example environment file and add your Google API credentials:
+```bash
+cp .env.example .env
 
-### v2.8.2
-- Removed debug instrumentation logging left over from development
-- Deployed to GitHub Pages with CI/CD workflow
+```
 
-### v2.8.0
-- Initial standalone release migrated from parent Strata project
 
-## License
+Open `.env` and fill in your `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY`.
+4. **Start the development server:**
+```bash
+npm run dev
 
-Copyright 2026 Christopher Moore
+```
 
-Licensed under the Apache License, Version 2.0. See individual source files for the full license text.
+
+The app will be available at `http://localhost:5173`.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Frontend:** React, Vite, Tailwind CSS
+* **Icons:** Lucide React
+* **Integrations:** Google Drive API v3, Google Picker API
+* **Specialty Libraries:** * `leaflet` (Map Pages)
+* `mermaid` (Diagram Pages)
+
+
+
+---
+
+## 📂 Architecture & Data Storage
+
+Strata does not use a traditional database. When a user authenticates, the app creates a specialized `Strata Notebooks` folder in the root of their Google Drive.
+
+* **Structure:** `strata_structure.json` and `strata_index.json` act as the manifest, tracking the order and metadata of Notebooks and Tabs.
+* **Content:** Individual pages are saved as separate `.json` files within corresponding Drive folders.
+* **Reconciliation:** The app automatically cleans up orphans and handles external Drive deletions gracefully to maintain state parity.
+
+---
+
+## 📝 License & Copyright
+
+Copyright © 2026 Christopher Moore / Chris Moore Designs LLC.
+All rights reserved.
+
+*(See [LICENSE](https://www.google.com/search?q=LICENSE) file for specific usage terms if applicable).*
+
+```
+
+```

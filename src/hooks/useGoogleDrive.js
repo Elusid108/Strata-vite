@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { APP_VERSION, DEBUG_SYNC } from '../lib/constants';
 import * as GoogleAPI from '../lib/google-api';
 import { generateOfflineViewerHtml } from '../lib/offline-viewer';
-import { cleanupOrphans, reconcileData } from '../lib/reconciler';
+import { reconcileData } from '../lib/reconciler';
 
 /**
  * Hook for managing Google Drive authentication and sync
@@ -44,9 +44,6 @@ export function useGoogleDrive(data, setData, showNotification) {
   const pendingContentSyncRef = useRef(false);
   
   const dirtyPagesRef = useRef(new Set());
-  
-  // Orphan cleanup -- run once per session
-  const orphanCleanupDoneRef = useRef(false);
 
   // Ref for structure sync to read current data without triggering effect on every data change
   const dataRef = useRef(data);
@@ -145,25 +142,9 @@ export function useGoogleDrive(data, setData, showNotification) {
     initDriveSync();
   }, [isAuthenticated, isLoadingAuth]);
 
-  // Run orphan cleanup once per session after Drive is ready
-  useEffect(() => {
-    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !data) return;
-    if (orphanCleanupDoneRef.current) return;
-    
-    // Only run if we have some data loaded (not empty initial state)
-    if (!data.notebooks || data.notebooks.length === 0) return;
-    
-    orphanCleanupDoneRef.current = true;
-    
-    // Fire-and-forget background cleanup with a delay to not interfere with initial sync
-    const cleanupTimeout = setTimeout(() => {
-      cleanupOrphans(data, driveRootFolderId).catch(err => {
-        console.error('Background orphan cleanup failed:', err);
-      });
-    }, 5000);
-    
-    return () => clearTimeout(cleanupTimeout);
-  }, [isAuthenticated, isLoadingAuth, driveRootFolderId, data]);
+  // Orphan cleanup disabled - was causing data loss when app loaded from stale cache.
+  // Will be reimplemented as a manual settings button in a future update.
+  // useEffect(() => { ... cleanupOrphans ... }, [...]);
 
   // Queue a Drive item for deletion during next structure sync
   const queueDriveDelete = useCallback((driveIds) => {

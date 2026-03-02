@@ -1911,6 +1911,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
         
         // Process notebooks
         for (const folder of notebooksResponse.result.files || []) {
+            if (folder.name === '_STRATA_TRASH') continue;
             const props = folder.properties || {};
             const notebook = {
                 id: `nb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -2952,7 +2953,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '2.9.93',
+            version: appVersion || '2.9.94',
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

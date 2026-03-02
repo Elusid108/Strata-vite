@@ -246,6 +246,7 @@ const BlockComponent = memo(({
               <MapBlock
                 data={block.mapData}
                 onUpdate={(mapData) => onUpdate(block.id, { mapData })}
+                locked={block.mapData?.locked}
               />
             </div>
           )}
@@ -253,45 +254,44 @@ const BlockComponent = memo(({
           {block.type === 'gdoc' && (
             <div className="space-y-2">
               {block.driveFileId ? (
-                <div className="border rounded overflow-hidden shadow-sm dark:border-gray-600">
-                  {block.mimeType === 'application/vnd.google-apps.document' && (
-                    <iframe 
-                      src={`https://docs.google.com/document/d/${block.driveFileId}/preview`}
-                      className="w-full h-96 border-0"
-                      title="Google Doc"
-                    />
-                  )}
-                  {block.mimeType === 'application/vnd.google-apps.spreadsheet' && (
-                    <iframe 
-                      src={`https://docs.google.com/spreadsheets/d/${block.driveFileId}/preview`}
-                      className="w-full h-96 border-0"
-                      title="Google Sheet"
-                    />
-                  )}
-                  {block.mimeType === 'application/vnd.google-apps.presentation' && (
-                    <iframe 
-                      src={`https://docs.google.com/presentation/d/${block.driveFileId}/preview`}
-                      className="w-full h-96 border-0"
-                      title="Google Slide"
-                    />
-                  )}
-                  {block.webViewLink && (
-                    <div className="p-2 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-600 flex items-center justify-between">
+                <div className="border rounded flex flex-col overflow-hidden shadow-sm dark:border-gray-600">
+                  {/* New File Info Header */}
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 border-b dark:border-gray-600 flex items-center justify-between">
+                    <div className="flex flex-col overflow-hidden mr-4">
+                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate" title={block.driveFileName || 'Google Drive File'}>
+                        {block.driveFileName || 'Google Drive File'}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 uppercase tracking-wider font-medium truncate">
+                        {block.mimeType ? block.mimeType.split('.').pop() : 'FILE'}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
                       <a 
                         href={block.webViewLink} 
                         target="_blank" 
                         rel="noopener noreferrer" 
-                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                        className="px-3 py-1.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
                       >
-                        Open in Google Drive
+                        Open
                       </a>
                       <button 
-                        onClick={() => onUpdate(block.id, { driveFileId: null, webViewLink: null, mimeType: null })} 
-                        className="text-xs text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+                        onClick={() => onUpdate(block.id, { driveFileId: null, webViewLink: null, mimeType: null, driveFileName: null })} 
+                        className="px-3 py-1.5 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded text-xs font-medium hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
                       >
                         Remove
                       </button>
                     </div>
+                  </div>
+
+                  {/* Iframes */}
+                  {block.mimeType === 'application/vnd.google-apps.document' && (
+                    <iframe src={`https://docs.google.com/document/d/${block.driveFileId}/preview`} className="w-full h-96 border-0 bg-white" title="Google Doc" />
+                  )}
+                  {block.mimeType === 'application/vnd.google-apps.spreadsheet' && (
+                    <iframe src={`https://docs.google.com/spreadsheets/d/${block.driveFileId}/preview`} className="w-full h-96 border-0 bg-white" title="Google Sheet" />
+                  )}
+                  {block.mimeType === 'application/vnd.google-apps.presentation' && (
+                    <iframe src={`https://docs.google.com/presentation/d/${block.driveFileId}/preview`} className="w-full h-96 border-0 bg-white" title="Google Slide" />
                   )}
                 </div>
               ) : (
@@ -303,7 +303,8 @@ const BlockComponent = memo(({
                           onUpdate(block.id, {
                             driveFileId: file.id,
                             webViewLink: file.url,
-                            mimeType: file.mimeType
+                            mimeType: file.mimeType,
+                            driveFileName: file.name
                           });
                         });
                       }}

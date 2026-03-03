@@ -9,6 +9,36 @@ import { Star, Edit3, X, ZoomIn, ZoomOut, Maximize2 } from '../icons';
 const getCode = (p) => (p.code ?? p.mermaidCode ?? p.codeContent ?? '').trim();
 const getCodeType = (p) => p.codeType || 'mermaid';
 
+const getSandboxedTemplate = (userCode, type) => {
+  const tailwind = '<script src="https://cdn.tailwindcss.com"></script>';
+  const react = `
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  `;
+
+  if (type === 'html') {
+    return `${tailwind}\n${react}\n${userCode}`;
+  }
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        ${tailwind}
+        ${react}
+      </head>
+      <body class="bg-white dark:bg-gray-900 p-4">
+        <div id="root"></div>
+        <script type="text/babel">
+          ${userCode.replace(/<\/script>/gi, '<\\/script>')}
+        </script>
+      </body>
+    </html>
+  `;
+};
+
 // Pyodide loading utilities
 let pyodidePromise = null;
 
@@ -568,7 +598,7 @@ const MermaidPageComponent = ({
             <iframe
               title="Code output"
               sandbox="allow-scripts"
-              srcDoc={codeType === 'javascript' ? '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script>' + code.replace(/<\/script>/gi, '<\\/script>') + '</scr' + 'ipt></body></html>' : code}
+              srcDoc={getSandboxedTemplate(code, codeType)}
               className="flex-1 min-h-0 w-full border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900"
               onError={() => setIframeError('Failed to load or run code.')}
             />

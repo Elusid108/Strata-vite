@@ -1,7 +1,7 @@
 {
   "name": "strata-vite",
   "private": true,
-  "version": "3.0.8",
+  "version": "3.0.81",
   "type": "module",
   "scripts": {
     "dev": "vite",

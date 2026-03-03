@@ -773,7 +773,8 @@ function App() {
     setShouldFocusTitle(true);
     showNotification('Page created', 'success');
     triggerStructureSync();
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+    triggerContentSync(newPage.id);
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync]);
 
   const addCanvasPage = useCallback(() => {
     if (!activeTabId) return;
@@ -799,7 +800,8 @@ function App() {
     setActivePageId(newPage.id);
     showNotification('Canvas page created', 'success');
     triggerStructureSync();
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+    triggerContentSync(newPage.id);
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync]);
 
   const addDatabasePage = useCallback(() => {
     if (!activeTabId) return;
@@ -825,7 +827,8 @@ function App() {
     setActivePageId(newPage.id);
     showNotification('Database page created', 'success');
     triggerStructureSync();
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+    triggerContentSync(newPage.id);
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync]);
 
   const addCodePage = useCallback(() => {
     if (!activeTabId) return;
@@ -851,7 +854,8 @@ function App() {
     setActivePageId(newPage.id);
     showNotification('Code page created', 'success');
     triggerStructureSync();
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+    triggerContentSync(newPage.id);
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync]);
 
   const addEmbedPageFromUrl = useCallback((rawUrl) => {
     if (!activeTabId || !rawUrl) return false;
@@ -894,8 +898,9 @@ function App() {
     setActivePageId(newPage.id);
     showNotification(`Google ${parsed.typeName} added`, 'success');
     triggerStructureSync();
+    triggerContentSync(newPage.id);
     return true;
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync]);
 
   const addLucidPage = useCallback((url) => {
     if (!activeTabId || !url) return;
@@ -928,7 +933,8 @@ function App() {
     setActivePageId(newPage.id);
     showNotification('Lucidchart added', 'success');
     triggerStructureSync();
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+    triggerContentSync(newPage.id);
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync]);
 
   const addGooglePage = useCallback((file) => {
     if (!activeTabId || !file) return;
@@ -1015,7 +1021,8 @@ function App() {
     setActivePageId(newPage.id);
     showNotification(`${file.name || 'Google ' + typeName} added`, 'success');
     triggerStructureSync();
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+    triggerContentSync(newPage.id);
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync]);
 
   // ==================== DELETE OPERATIONS ====================
   
@@ -1595,7 +1602,7 @@ function App() {
                     <span className={settings.condensedView ? 'text-xl' : ''}>{page.icon || '📄'}</span>
                     {!settings.condensedView && <span className="truncate">{page.name}</span>}
                     {!settings.condensedView && (
-                      <Star size={14} filled={true} className="text-yellow-400 opacity-50 ml-auto flex-shrink-0" />
+                      <Star size={14} className="text-yellow-400 opacity-50 ml-auto flex-shrink-0 fill-current" />
                     )}
                   </div>
                 ))}
@@ -2065,7 +2072,7 @@ function App() {
                           onClick={(e) => { e.stopPropagation(); toggleStar(page.id, activeNotebookId, activeTabId); }}
                           className={`${page.starred ? 'text-yellow-400' : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-yellow-400'} transition-all`}
                         >
-                          <Star size={14} filled={page.starred} />
+                          <Star size={14} className={page.starred ? "fill-current" : ""} />
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); executeDelete('page', page.id); }}

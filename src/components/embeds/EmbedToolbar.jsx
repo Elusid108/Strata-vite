@@ -40,7 +40,7 @@ export function EmbedToolbar({
           }`}
           title={isStarred ? 'Unstar' : 'Star'}
         >
-          <Star size={16} fill={isStarred ? 'currentColor' : 'none'} />
+          <Star size={16} className={isStarred ? "text-yellow-400 fill-current" : "text-gray-400"} />
         </button>
         {/* Edit URL button */}
         <button

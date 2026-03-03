@@ -2964,7 +2964,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '3.0.8',
+            version: appVersion || '3.0.81',
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

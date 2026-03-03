@@ -125,6 +125,8 @@ function App() {
   const [showPageTypeMenu, setShowPageTypeMenu] = useState(false);
   const [showDriveUrlModal, setShowDriveUrlModal] = useState(false);
   const [driveUrlModalValue, setDriveUrlModalValue] = useState('');
+  const [showLucidModal, setShowLucidModal] = useState(false);
+  const [lucidUrlValue, setLucidUrlValue] = useState('');
   const [favoritesExpanded, setFavoritesExpanded] = useState(false);
   
   // Embed page states
@@ -888,6 +890,39 @@ function App() {
     showNotification(`Google ${parsed.typeName} added`, 'success');
     triggerStructureSync();
     return true;
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
+
+  const addLucidPage = useCallback((url) => {
+    if (!activeTabId || !url) return;
+    saveToHistory();
+    const newPage = {
+      id: generateId(),
+      name: 'Lucidchart',
+      type: 'lucidchart',
+      embedUrl: url,
+      icon: '📊',
+      createdAt: Date.now()
+    };
+
+    const newData = {
+      ...data,
+      notebooks: data.notebooks.map(nb =>
+        nb.id !== activeNotebookId ? nb : {
+          ...nb,
+          tabs: nb.tabs.map(tab =>
+            tab.id !== activeTabId ? tab : {
+              ...tab,
+              pages: [...tab.pages, newPage],
+              activePageId: newPage.id
+            }
+          )
+        }
+      )
+    };
+    setData(newData);
+    setActivePageId(newPage.id);
+    showNotification('Lucidchart added', 'success');
+    triggerStructureSync();
   }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync]);
 
   const addGooglePage = useCallback((file) => {
@@ -1762,7 +1797,7 @@ function App() {
 
             {/* Layer 2: Non-embed content (Canvas, Database, Mermaid, Block, reconnect) */}
             {activePage && !activePage.embedUrl && (
-              <div className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-800">
+              <div className={`absolute inset-0 z-20 bg-white dark:bg-gray-800 ${['canvas', 'database', 'mermaid', 'code'].includes(activePage.type) ? 'overflow-hidden' : 'overflow-auto'}`}>
                 {activePage.type === 'canvas' ? (
                   <CanvasPageComponent
                     page={activePage}
@@ -1936,6 +1971,9 @@ function App() {
                       </button>
                       <button onClick={() => { setShowDriveUrlModal(true); setShowPageTypeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 text-sm">
                         <img src={DRIVE_LOGO_URL} alt="" className="w-5 h-5 object-contain" /> Drive URL
+                      </button>
+                      <button onClick={() => { setShowLucidModal(true); setShowPageTypeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 text-sm">
+                        <span className="text-lg">📊</span> Lucidchart
                       </button>
                     </div>
                   )}
@@ -2449,6 +2487,86 @@ function App() {
           </div>
         </div>
       )}
+
+      {showLucidModal && (() => {
+        const handleAddLucid = () => {
+          if (!lucidUrlValue) return;
+          let finalUrl = lucidUrlValue.trim();
+
+          // Extract src if the user pasted the full <iframe> HTML snippet
+          const srcMatch = finalUrl.match(/src=["'](.*?)["']/);
+          if (srcMatch) finalUrl = srcMatch[1];
+
+          // REGEX FIX: Convert Editor/View URLs to the embeddable format
+          // This turns /lucidchart/UUID/edit into /documents/embedded/UUID
+          const uuidMatch = finalUrl.match(/lucidchart\/([a-f0-9-]+)/);
+          if (uuidMatch) {
+            finalUrl = `https://lucid.app/documents/embedded/${uuidMatch[1]}`;
+          } else {
+            // Fallback for standard published links
+            finalUrl = finalUrl.replace('/documents/view/', '/documents/embedded/');
+          }
+
+          addLucidPage(finalUrl);
+          setShowLucidModal(false);
+          setLucidUrlValue('');
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="font-bold text-xl flex items-center gap-3 dark:text-white">
+                  <span className="text-2xl">📊</span> Add Lucidchart
+                </h3>
+                <button
+                  onClick={() => { setShowLucidModal(false); setLucidUrlValue(''); }}
+                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                >
+                  <X size={20} className="dark:text-white" />
+                </button>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Publish / Embed URL</label>
+                <input
+                  className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
+                  placeholder="https://lucid.app/documents/embedded/..."
+                  value={lucidUrlValue}
+                  onChange={(e) => setLucidUrlValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddLucid();
+                    else if (e.key === 'Escape') {
+                      setShowLucidModal(false);
+                      setLucidUrlValue('');
+                    }
+                  }}
+                  autoFocus
+                />
+                <p className="text-xs text-gray-400 mt-2">
+                  In Lucidchart, go to File &gt; Publish &gt; Generate Link, and paste the URL here.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => { setShowLucidModal(false); setLucidUrlValue(''); }}
+                  className="px-5 py-2 font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddLucid}
+                  disabled={!lucidUrlValue}
+                  className="px-5 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add Page
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Notification */}
       {notification && (

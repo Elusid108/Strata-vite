@@ -29,7 +29,7 @@ const getSandboxedTemplate = (userCode, type) => {
         ${tailwind}
         ${react}
       </head>
-      <body class="bg-white dark:bg-gray-900 p-4">
+      <body class="bg-white dark:bg-gray-900 m-0 p-0">
         <div id="root"></div>
         <script type="text/babel">
           ${userCode.replace(/<\/script>/gi, '<\\/script>')}
@@ -594,7 +594,7 @@ const MermaidPageComponent = ({
             <div className="text-sm text-red-600 dark:text-red-400">{iframeError}</div>
           </div>
         ) : (
-          <div className="flex-1 min-h-0 flex flex-col p-4 overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <iframe
               title="Code output"
               sandbox="allow-scripts"

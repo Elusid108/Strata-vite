@@ -80,6 +80,7 @@ export function EmbedPage({
       case 'site':
       case 'script':
       case 'drive':
+      case 'lucidchart':
       default:
         return <GenericDriveEmbed page={page} />;
     }

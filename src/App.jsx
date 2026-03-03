@@ -1973,7 +1973,7 @@ function App() {
                         <img src={DRIVE_LOGO_URL} alt="" className="w-5 h-5 object-contain" /> Drive URL
                       </button>
                       <button onClick={() => { setShowLucidModal(true); setShowPageTypeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 text-sm">
-                        <span className="text-lg">📊</span> Lucidchart
+                        <img src="https://www.google.com/s2/favicons?domain=lucid.app&sz=128" alt="" className="w-5 h-5 object-contain rounded-sm" /> Lucidchart
                       </button>
                     </div>
                   )}
@@ -2562,6 +2562,77 @@ function App() {
                 >
                   Add Page
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Edit Embed URL Modal */}
+      {showEditEmbed && (() => {
+        const handleSave = () => {
+          if (!editEmbedUrl) return;
+          let finalUrl = editEmbedUrl.trim();
+          const activePage = data.notebooks.flatMap(n => n.tabs).flatMap(t => t.pages).find(p => p.id === activePageId);
+
+          // Re-run formatting for Lucidchart URLs
+          if (activePage?.type === 'lucidchart') {
+            const srcMatch = finalUrl.match(/src=["'](.*?)["']/);
+            if (srcMatch) finalUrl = srcMatch[1];
+            const uuidMatch = finalUrl.match(/lucidchart\/([a-f0-9-]+)/);
+            if (uuidMatch) {
+              finalUrl = `https://lucid.app/documents/embedded/${uuidMatch[1]}`;
+            } else {
+              finalUrl = finalUrl.replace('/documents/view/', '/documents/embedded/');
+              finalUrl = finalUrl.replace('/documents/edit/', '/documents/embedded/');
+            }
+          }
+
+          setData(prev => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, p => ({
+            ...p,
+            name: editEmbedName || p.name,
+            embedUrl: finalUrl,
+            originalUrl: editEmbedUrl,
+            webViewLink: finalUrl
+          })));
+          triggerContentSync(activePageId);
+          setShowEditEmbed(false);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="font-bold text-xl flex items-center gap-2 dark:text-white">
+                  <Edit3 size={20} /> Edit Embed
+                </h3>
+                <button onClick={() => setShowEditEmbed(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                  <X size={20} className="dark:text-white" />
+                </button>
+              </div>
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Page Name</label>
+                  <input
+                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white"
+                    value={editEmbedName}
+                    onChange={(e) => setEditEmbedName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">URL</label>
+                  <input
+                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 dark:text-white"
+                    value={editEmbedUrl}
+                    onChange={(e) => setEditEmbedUrl(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowEditEmbed(false)} className="px-5 py-2 font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">Cancel</button>
+                <button onClick={handleSave} className="px-5 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 shadow-lg">Save Changes</button>
               </div>
             </div>
           </div>

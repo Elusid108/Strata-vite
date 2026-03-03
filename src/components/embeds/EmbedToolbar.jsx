@@ -42,6 +42,14 @@ export function EmbedToolbar({
         >
           <Star size={16} fill={isStarred ? 'currentColor' : 'none'} />
         </button>
+        {/* Edit URL button */}
+        <button
+          onClick={onEditUrl}
+          className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-blue-500 transition-colors"
+          title="Edit URL"
+        >
+          <Edit3 size={16} />
+        </button>
       </div>
       
       {/* Right: Edit/Preview toggle, Popout, Edit URL */}
@@ -78,15 +86,6 @@ export function EmbedToolbar({
             <ExternalLink size={14} />
           </a>
         )}
-        
-        {/* Edit URL button */}
-        <button
-          onClick={onEditUrl}
-          className="px-2.5 py-1 text-sm bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 flex items-center gap-1.5"
-        >
-          <Edit3 size={12} />
-          Edit URL
-        </button>
       </div>
     </div>
   );

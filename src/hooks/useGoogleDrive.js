@@ -370,6 +370,7 @@ export function useGoogleDrive(data, setData, showNotification) {
           console.error('Error updating manifest/index.html:', error);
         }
         
+        localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current.notebooks));
         setLastSyncTime(Date.now());
         if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: complete');
       } catch (error) {
@@ -450,6 +451,7 @@ export function useGoogleDrive(data, setData, showNotification) {
           }
         }
         dirtyPagesRef.current.clear();
+        localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current.notebooks));
         lastContentSyncRef.current = Date.now();
         if (DEBUG_SYNC) console.log('[Strata Sync] content sync: complete', { pagesSynced });
       } finally {
@@ -514,8 +516,6 @@ export function useGoogleDrive(data, setData, showNotification) {
       if (driveData && driveData.notebooks) {
         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: loaded from Drive', { notebookCount: driveData.notebooks.length });
         const reconciled = reconcileData(driveData);
-        // Set data BEFORE driveRootFolderId so structure sync runs with Drive data, not INITIAL_DATA
-        setData(reconciled);
         setDriveRootFolderId(rootFolderId);
         // Cache the data
         if (cacheKey) {
@@ -532,7 +532,6 @@ export function useGoogleDrive(data, setData, showNotification) {
       if (cached?.data) {
         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: using cached data', { notebookCount: cached.data.notebooks?.length });
         const reconciled = reconcileData(cached.data);
-        setData(reconciled);
         setDriveRootFolderId(rootFolderId);
         setHasInitialLoadCompleted(true);
         return reconciled;

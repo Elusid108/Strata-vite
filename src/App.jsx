@@ -139,6 +139,7 @@ function App() {
   // Account states
   const [showAccountPopup, setShowAccountPopup] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const [syncConflict, setSyncConflict] = useState(null);
   
   // Refs for syncing
   const syncContentDebounceRef = useRef(null);
@@ -237,17 +238,20 @@ function App() {
         try {
           const driveData = await loadFromDrive();
           if (driveData && driveData.notebooks) {
-            if (DEBUG_SYNC) console.log('[Strata Sync] loadData: using Drive data', { notebookCount: driveData.notebooks.length });
-            setData(driveData);
-            if (driveData.notebooks.length > 0) {
-              setActiveFromData(driveData);
+            const localData = loadFromLocalStorage();
+            const localStr = JSON.stringify(localData?.notebooks || []);
+            const driveStr = JSON.stringify(driveData.notebooks || []);
+            const initialStr = JSON.stringify(INITIAL_DATA.notebooks);
+            const lastSyncedHash = localStorage.getItem('strata_last_synced_hash');
+
+            if (localStr !== driveStr && localStr !== initialStr && localStr !== lastSyncedHash) {
+              setSyncConflict({ localData, driveData });
             } else {
-              setActiveNotebookId(null);
-              setActiveTabId(null);
-              setActivePageId(null);
+              setData(driveData);
+              if (driveData.notebooks.length > 0) setActiveFromData(driveData);
+              localStorage.setItem('strata_last_synced_hash', driveStr);
             }
           } else {
-            if (DEBUG_SYNC) console.log('[Strata Sync] loadData: Drive empty, using INITIAL_DATA');
             setData(INITIAL_DATA);
             setActiveFromData(INITIAL_DATA);
           }
@@ -2301,6 +2305,55 @@ function App() {
                 className="px-4 py-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg"
               >
                 Yes, Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sync Conflict Modal */}
+      {syncConflict && (
+        <div className="fixed inset-0 bg-black/50 z-[10002] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-6">
+            <h3 className="font-bold text-xl mb-3 flex items-center gap-2 dark:text-white">
+              <AlertCircle className="text-yellow-500" /> Offline Changes Detected
+            </h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed text-sm">
+              We found local changes on this device that haven't been saved to Google Drive. Which version would you like to keep?
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => {
+                  setData(syncConflict.localData);
+                  triggerStructureSync();
+                  setSyncConflict(null);
+                }}
+                className="w-full text-left p-4 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+              >
+                <div className="font-bold text-blue-700 dark:text-blue-300 mb-1">Keep Local Changes</div>
+                <div className="text-xs text-blue-600 dark:text-blue-400">Overwrites Google Drive with the unsynced data currently on this device.</div>
+              </button>
+              <button
+                onClick={() => {
+                  setData(syncConflict.driveData);
+                  localStorage.setItem('strata_last_synced_hash', JSON.stringify(syncConflict.driveData.notebooks));
+                  setSyncConflict(null);
+                  
+                  // Reset active view based on Drive Data
+                  if (syncConflict.driveData.notebooks?.length > 0) {
+                    const nb = syncConflict.driveData.notebooks[0];
+                    setActiveNotebookId(nb.id);
+                    const tab = nb.tabs[0];
+                    if (tab) {
+                      setActiveTabId(tab.id);
+                      setActivePageId(tab.pages[0]?.id || null);
+                    }
+                  }
+                }}
+                className="w-full text-left p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <div className="font-bold text-gray-700 dark:text-gray-300 mb-1">Discard Local & Load from Drive</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Reverts to the last safely synced state from Google Drive.</div>
               </button>
             </div>
           </div>

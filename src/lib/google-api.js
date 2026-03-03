@@ -1322,6 +1322,10 @@ const savePageFile = async (page, tabFolderId) => {
             content: contentToSave,
             googleFileId: page.googleFileId,
             url: page.url,
+            embedUrl: page.embedUrl,         // Crucial for embeds and Lucidchart
+            webViewLink: page.webViewLink,
+            originalUrl: page.originalUrl,
+            driveFileId: page.driveFileId,   // The linked Google Doc ID
             createdAt: page.createdAt,
             modifiedAt: Date.now(),
             starred: page.starred || false
@@ -2960,7 +2964,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '3.0.11',
+            version: appVersion || '3.0.8',
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

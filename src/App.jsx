@@ -1026,23 +1026,30 @@ function App() {
 
     // Collect Drive IDs to delete before removing from local data
     const driveIdsToDelete = [];
+    const getPageDeleteId = (page) => {
+      const isEmbed = ['doc','sheet','slide','form','drawing','vid','pdf','site','script','drive','lucidchart'].includes(page.type);
+      // Always delete the shortcut JSON file, NEVER the source Drive file.
+      return page.driveLinkFileId || (!isEmbed ? page.driveFileId : null);
+    };
     const collectDriveIds = (item, itemType) => {
       if (itemType === 'notebook') {
         if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
-        // Also collect child tab/page Drive IDs
         for (const tab of (item.tabs || [])) {
           if (tab.driveFolderId) driveIdsToDelete.push(tab.driveFolderId);
           for (const page of (tab.pages || [])) {
-            if (page.driveFileId) driveIdsToDelete.push(page.driveFileId);
+            const delId = getPageDeleteId(page);
+            if (delId) driveIdsToDelete.push(delId);
           }
         }
       } else if (itemType === 'tab') {
         if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
         for (const page of (item.pages || [])) {
-          if (page.driveFileId) driveIdsToDelete.push(page.driveFileId);
+          const delId = getPageDeleteId(page);
+          if (delId) driveIdsToDelete.push(delId);
         }
       } else if (itemType === 'page') {
-        if (item.driveFileId) driveIdsToDelete.push(item.driveFileId);
+        const delId = getPageDeleteId(item);
+        if (delId) driveIdsToDelete.push(delId);
       }
     };
 
@@ -1859,7 +1866,7 @@ function App() {
                         )}
                         {!activePage.cover && <div className="h-12 w-full"></div>}
                         <div className={`absolute ${activePage.cover ? 'top-4 right-4' : 'bottom-0 right-4'} opacity-0 group-hover/cover:opacity-100 transition-opacity flex gap-2 z-10`}>
-                          <button onClick={() => setShowCoverInput(true)} className="bg-white/90 dark:bg-gray-800/90 backdrop-blur px-3 py-1.5 rounded text-xs font-medium hover:bg-white dark:hover:bg-gray-700 shadow-sm border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300">
+                          <button onClick={() => setShowCoverInput(true)} className="cover-input-trigger bg-white/90 dark:bg-gray-800/90 backdrop-blur px-3 py-1.5 rounded text-xs font-medium hover:bg-white dark:hover:bg-gray-700 shadow-sm border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300">
                             {activePage.cover ? 'Change Cover' : 'Add Cover'}
                           </button>
                           {activePage.cover && (
@@ -2736,23 +2743,6 @@ function App() {
                 }}
               />
               <p className="text-[10px] text-gray-400 mt-1">Paste any image URL. Drive images must be publicly shared.</p>
-            </div>
-
-            <div className="mb-4">
-              <button
-                onClick={() => {
-                  setShowCoverInput(false);
-                  if (typeof GoogleAPI !== 'undefined' && GoogleAPI.showDrivePicker) {
-                    GoogleAPI.showDrivePicker((file) => {
-                      const coverUrl = `https://drive.google.com/thumbnail?id=${file.id}&sz=w1500`;
-                      updatePageCover(activePageId, coverUrl);
-                    }, 'image/');
-                  }
-                }}
-                className="w-full py-2 border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-sm font-medium flex items-center justify-center gap-2 dark:text-white"
-              >
-                <img src={DRIVE_LOGO_URL} alt="" className="w-4 h-4 object-contain" /> Select from Google Drive
-              </button>
             </div>
 
             <div>

@@ -184,7 +184,8 @@ function App() {
     triggerStructureSync,
     triggerContentSync,
     syncRenameToDrive,
-    queueDriveDelete
+    queueDriveDelete,
+    hasInitialLoadCompleted
   } = useGoogleDrive(data, setData, showNotification);
   
   // History hook - manages undo/redo
@@ -1184,6 +1185,12 @@ function App() {
     triggerStructureSync();
   }, [setData, activeNotebookId, triggerStructureSync]);
 
+  const updatePageCover = useCallback((pageId, coverData) => {
+    const { notebookId, tabId } = activeIdsRef.current;
+    setData(prev => updatePageInData(prev, { notebookId, tabId, pageId }, p => ({ ...p, cover: coverData })));
+    triggerContentSync(pageId);
+  }, [setData, triggerContentSync]);
+
   const updatePageIcon = useCallback((pageId, icon) => {
     setData(prev => ({
       ...prev,
@@ -1330,7 +1337,8 @@ function App() {
       return next;
     });
     triggerStructureSync();
-  }, [setData, triggerStructureSync]);
+    triggerContentSync(pageId);
+  }, [setData, triggerStructureSync, triggerContentSync]);
 
   const getStarredPages = useCallback(() => {
     const starred = [];
@@ -1574,22 +1582,13 @@ function App() {
                         )
                       }));
                     }}
-                    className={`flex items-center ${settings.condensedView ? 'justify-center' : 'gap-2'} px-4 py-1 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700`}
+                    className={`flex items-center ${settings.condensedView ? 'justify-center' : 'pl-6 pr-4 gap-2'} py-1 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700`}
                     title={settings.condensedView ? page.name : undefined}
                   >
                     <span className={settings.condensedView ? 'text-xl' : ''}>{page.icon || '📄'}</span>
                     {!settings.condensedView && <span className="truncate">{page.name}</span>}
                     {!settings.condensedView && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleStar(page.id, page.notebookId, page.tabId);
-                        }}
-                        className="text-yellow-400 hover:opacity-80 flex-shrink-0"
-                        title="Remove from favorites"
-                      >
-                        <Star size={14} filled={true} />
-                      </button>
+                      <Star size={14} filled={true} className="text-yellow-400 opacity-50 ml-auto flex-shrink-0" />
                     )}
                   </div>
                 ))}
@@ -1821,7 +1820,7 @@ function App() {
                     saveToHistory={saveToHistory}
                     showNotification={showNotification}
                   />
-                ) : ['doc','sheet','slide','form','drawing','vid','pdf','site','script','drive'].includes(activePage.type) ? (
+                ) : ['doc','sheet','slide','form','drawing','vid','pdf','site','script','drive','lucidchart'].includes(activePage.type) ? (
                   // Embed-type page missing its embed URL - show reconnect message
                   <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-500 dark:text-gray-400 p-8">
                     <div className="text-6xl">{activePage.icon || '📄'}</div>
@@ -1847,9 +1846,29 @@ function App() {
                 <div className="min-h-full bg-gray-100 dark:bg-gray-900 p-4">
                   <div className="max-w-4xl mx-auto min-h-[500px] bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden pb-10">
                       {/* Page Header */}
-                      {activePage.cover && (
-                        <div className="h-48 w-full bg-cover bg-center rounded-t-lg" style={{ backgroundImage: `url(${activePage.cover})` }} />
-                      )}
+                      <div className="relative group/cover">
+                        {activePage.cover && (
+                          <div
+                            className="h-48 w-full rounded-t-lg transition-all"
+                            style={
+                              activePage.cover.startsWith('linear-gradient') || activePage.cover.startsWith('#') || activePage.cover.startsWith('rgb')
+                              ? { background: activePage.cover }
+                              : { backgroundImage: `url(${activePage.cover})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                            }
+                          />
+                        )}
+                        {!activePage.cover && <div className="h-12 w-full"></div>}
+                        <div className={`absolute ${activePage.cover ? 'top-4 right-4' : 'bottom-0 right-4'} opacity-0 group-hover/cover:opacity-100 transition-opacity flex gap-2 z-10`}>
+                          <button onClick={() => setShowCoverInput(true)} className="bg-white/90 dark:bg-gray-800/90 backdrop-blur px-3 py-1.5 rounded text-xs font-medium hover:bg-white dark:hover:bg-gray-700 shadow-sm border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300">
+                            {activePage.cover ? 'Change Cover' : 'Add Cover'}
+                          </button>
+                          {activePage.cover && (
+                            <button onClick={() => updatePageCover(activePage.id, null)} className="bg-white/90 dark:bg-gray-800/90 backdrop-blur p-1.5 rounded text-xs font-medium hover:bg-red-50 dark:hover:bg-red-900/30 text-red-500 shadow-sm border border-gray-200 dark:border-gray-600">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       <div className="px-8 py-8">
                         <div className="flex items-center gap-4 mb-6">
                           <span
@@ -2691,6 +2710,83 @@ function App() {
           </div>
         );
       })()}
+
+      {/* Cover Picker Modal */}
+      {showCoverInput && (
+        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6 cover-input">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-lg dark:text-white">Page Cover</h3>
+              <button onClick={() => setShowCoverInput(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                <X size={20} className="dark:text-white"/>
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Image URL</label>
+              <input
+                type="text"
+                placeholder="https://..."
+                className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-transparent dark:text-white text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    updatePageCover(activePageId, e.target.value);
+                    setShowCoverInput(false);
+                  }
+                }}
+              />
+              <p className="text-[10px] text-gray-400 mt-1">Paste any image URL. Drive images must be publicly shared.</p>
+            </div>
+
+            <div className="mb-4">
+              <button
+                onClick={() => {
+                  setShowCoverInput(false);
+                  if (typeof GoogleAPI !== 'undefined' && GoogleAPI.showDrivePicker) {
+                    GoogleAPI.showDrivePicker((file) => {
+                      const coverUrl = `https://drive.google.com/thumbnail?id=${file.id}&sz=w1500`;
+                      updatePageCover(activePageId, coverUrl);
+                    }, 'image/');
+                  }
+                }}
+                className="w-full py-2 border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-sm font-medium flex items-center justify-center gap-2 dark:text-white"
+              >
+                <img src={DRIVE_LOGO_URL} alt="" className="w-4 h-4 object-contain" /> Select from Google Drive
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Gradients & Colors</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  'linear-gradient(to right, #ff9a9e, #fecfef)',
+                  'linear-gradient(to right, #a18cd1, #fbc2eb)',
+                  'linear-gradient(to right, #84fab0, #8fd3f4)',
+                  'linear-gradient(to right, #fccb90, #d57eeb)',
+                  'linear-gradient(to right, #e0c3fc, #8ec5fc)',
+                  'linear-gradient(to right, #4facfe, #00f2fe)',
+                  '#1e293b', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'
+                ].map(bg => (
+                  <div
+                    key={bg}
+                    onClick={() => { updatePageCover(activePageId, bg); setShowCoverInput(false); }}
+                    className="h-10 rounded cursor-pointer border border-black/10 hover:scale-105 transition-transform"
+                    style={{ background: bg }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAuthenticated && !hasInitialLoadCompleted && (
+        <div className="fixed inset-0 z-[9999] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm flex flex-col items-center justify-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <h2 className="text-xl font-bold text-gray-800 dark:text-white">Loading Workspace</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">Syncing your notebooks from Google Drive...</p>
+        </div>
+      )}
 
       {/* Notification */}
       {notification && (

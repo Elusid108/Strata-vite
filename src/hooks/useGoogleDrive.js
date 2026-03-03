@@ -625,6 +625,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     isSyncing,
     lastSyncTime,
     hasUnsyncedChanges,
+    hasInitialLoadCompleted,
     
     // Actions
     handleSignIn,

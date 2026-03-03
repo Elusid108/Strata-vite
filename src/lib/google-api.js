@@ -47,7 +47,7 @@ let tokenClient = null;
 let accessToken = null;
 let userEmail = null;
 
-// Session storage keys for persistence
+// Local storage keys for persistence (survives tab closure)
 const STORAGE_KEY_TOKEN = 'strata_access_token';
 const STORAGE_KEY_USER = 'strata_user_info';
 const STORAGE_KEY_EXPIRY = 'strata_token_expiry';
@@ -156,17 +156,17 @@ const initTokenClient = (resolve, reject) => {
                 } catch (setTokenErr) {
                 }
                 
-                // Save token to sessionStorage for persistence (expires in ~1 hour)
+                // Save token to localStorage for persistence (expires in ~1 hour)
                 const expiryTime = Date.now() + (response.expires_in * 1000);
-                sessionStorage.setItem(STORAGE_KEY_TOKEN, accessToken);
-                sessionStorage.setItem(STORAGE_KEY_EXPIRY, expiryTime.toString());
-                
+                localStorage.setItem(STORAGE_KEY_TOKEN, accessToken);
+                localStorage.setItem(STORAGE_KEY_EXPIRY, expiryTime.toString());
+
                 // Resolve the pending sign-in promise
                 if (signInResolver) {
                     try {
                         const userInfo = await getUserInfo();
-                        // Save user info to sessionStorage
-                        sessionStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+                        // Save user info to localStorage
+                        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
                         signInResolver(userInfo);
                     } catch (error) {
                         if (signInRejecter) signInRejecter(error);
@@ -213,10 +213,10 @@ const signOut = () => {
         userEmail = null;
         gapi.client.setToken(null);
     }
-    // Clear session storage
-    sessionStorage.removeItem(STORAGE_KEY_TOKEN);
-    sessionStorage.removeItem(STORAGE_KEY_USER);
-    sessionStorage.removeItem(STORAGE_KEY_EXPIRY);
+    // Clear local storage
+    localStorage.removeItem(STORAGE_KEY_TOKEN);
+    localStorage.removeItem(STORAGE_KEY_USER);
+    localStorage.removeItem(STORAGE_KEY_EXPIRY);
 };
 
 // Get current access token
@@ -234,10 +234,10 @@ const checkAuthStatus = async () => {
             await initGoogleAuth();
         }
 
-        // First check sessionStorage for saved token
-        const savedToken = sessionStorage.getItem(STORAGE_KEY_TOKEN);
-        const savedExpiry = sessionStorage.getItem(STORAGE_KEY_EXPIRY);
-        const savedUser = sessionStorage.getItem(STORAGE_KEY_USER);
+        // First check localStorage for saved token
+        const savedToken = localStorage.getItem(STORAGE_KEY_TOKEN);
+        const savedExpiry = localStorage.getItem(STORAGE_KEY_EXPIRY);
+        const savedUser = localStorage.getItem(STORAGE_KEY_USER);
         
         if (savedToken && savedExpiry) {
             const expiryTime = parseInt(savedExpiry, 10);
@@ -256,7 +256,7 @@ const checkAuthStatus = async () => {
                 // Otherwise fetch fresh user info
                 try {
                     const userInfo = await getUserInfo();
-                    sessionStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+                    localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
                     return userInfo;
                 } catch (e) {
                     // Token invalid, clear storage
@@ -264,7 +264,13 @@ const checkAuthStatus = async () => {
                     return null;
                 }
             } else {
-                // Token expired - don't signOut; let handleTokenExpiration attempt silent refresh
+                if (tokenClient) {
+                    return new Promise((resolve) => {
+                        signInResolver = resolve;
+                        signInRejecter = () => resolve(null);
+                        tokenClient.requestAccessToken({ prompt: '' });
+                    });
+                }
                 return null;
             }
         }
@@ -2071,7 +2077,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
                     }
                     
                     // Derive page type from content when file properties lack it (fix for existing link files)
-                    const googleTypes = ['doc', 'sheet', 'slide', 'pdf', 'drive'];
+                    const googleTypes = ['doc', 'sheet', 'slide', 'pdf', 'drive', 'lucidchart'];
                     const contentType = googleTypes.includes(pageContent.type) ? pageContent.type : null;
                     const pageType = contentType || page.type;
                     if (contentType) page.type = contentType;

@@ -82,7 +82,7 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showIconPicker]);
 
-  // Save to page data (including transform) - debounced to break update loop and reduce re-renders
+  // Save to page data - debounced to break update loop and reduce re-renders
   useEffect(() => {
     if (onUpdateTimeoutRef.current) clearTimeout(onUpdateTimeoutRef.current);
     onUpdateTimeoutRef.current = setTimeout(() => {
@@ -91,7 +91,7 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
           containers, 
           paths, 
           pageTitle,
-          transform 
+          transform: transformRef.current // Grab the latest transform without triggering a save loop
         },
         name: pageTitle
       });
@@ -100,7 +100,7 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     return () => {
       if (onUpdateTimeoutRef.current) clearTimeout(onUpdateTimeoutRef.current);
     };
-  }, [containers, paths, pageTitle, transform, page.id]);
+  }, [containers, paths, pageTitle, page.id]); // REMOVED transform from dependencies
 
   // History management
   const pushToHistory = () => {

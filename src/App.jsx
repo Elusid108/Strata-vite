@@ -1965,10 +1965,10 @@ function App() {
                       <button onClick={() => { addDatabasePage(); setShowPageTypeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 text-sm">
                         <span className="text-lg">🗄</span> Database
                       </button>
-                      <div className="border-t border-gray-100 dark:border-gray-700 my-1"></div>
                       <button onClick={() => { addCodePage(); setShowPageTypeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 text-sm">
                         <span className="text-lg">&lt;/&gt;</span> Code Page
                       </button>
+                      <div className="border-t border-gray-100 dark:border-gray-700 my-1"></div>
                       <button onClick={() => { setShowDriveUrlModal(true); setShowPageTypeMenu(false); }} className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 text-sm">
                         <img src={DRIVE_LOGO_URL} alt="" className="w-5 h-5 object-contain" /> Drive URL
                       </button>

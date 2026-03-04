@@ -6,7 +6,6 @@ import {
   EMOJIS, 
   BLOCK_TYPES, 
   INITIAL_DATA,
-  DEBUG_SYNC,
   DRIVE_LOGO_URL,
   DRIVE_SERVICE_ICONS
 } from './lib/constants';
@@ -58,20 +57,86 @@ import {
 } from './components/pages';
 import { EmbedPage } from './components/embeds';
 import { parseEmbedUrl } from './lib/embed-utils';
+import { log } from './lib/logger';
 
 // Hooks
-import { useLocalStorage } from './hooks/useLocalStorage';
-import { useGoogleDrive } from './hooks/useGoogleDrive';
-import { useHistory } from './hooks/useHistory';
+import { useStrata } from './contexts/StrataContext';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 
 function App() {
-  // ==================== STATE ====================
-  
-  // Active IDs
-  const [activeNotebookId, setActiveNotebookId] = useState(null);
-  const [activeTabId, setActiveTabId] = useState(null);
-  const [activePageId, setActivePageId] = useState(null);
+  // ==================== CONTEXT ====================
+  const {
+    data,
+    setData,
+    settings,
+    setSettings,
+    loadFromLocalStorage,
+    isAuthenticated,
+    isLoadingAuth,
+    userEmail,
+    userName,
+    driveRootFolderId,
+    isSyncing,
+    hasUnsyncedChanges,
+    handleSignIn,
+    handleSignOut,
+    loadFromDrive,
+    triggerStructureSync,
+    triggerContentSync,
+    syncRenameToDrive,
+    queueDriveDelete,
+    hasInitialLoadCompleted,
+    saveToHistory,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    activeNotebookId,
+    setActiveNotebookId,
+    activeTabId,
+    setActiveTabId,
+    activePageId,
+    setActivePageId,
+    showSettings,
+    setShowSettings,
+    showAddMenu,
+    setShowAddMenu,
+    activeTabMenu,
+    setActiveTabMenu,
+    notification,
+    setNotification,
+    showNotification,
+    itemToDelete,
+    setItemToDelete,
+    showDriveUrlModal,
+    setShowDriveUrlModal,
+    showPageTypeMenu,
+    setShowPageTypeMenu,
+    showAccountPopup,
+    setShowAccountPopup,
+    showSignOutConfirm,
+    setShowSignOutConfirm,
+    showIconPicker,
+    setShowIconPicker,
+    showCoverInput,
+    setShowCoverInput,
+    notebookIconPicker,
+    setNotebookIconPicker,
+    tabIconPicker,
+    setTabIconPicker,
+    pageIconPicker,
+    setPageIconPicker,
+    showEditEmbed,
+    setShowEditEmbed,
+    showLucidModal,
+    setShowLucidModal,
+    favoritesExpanded,
+    setFavoritesExpanded,
+    syncConflict,
+    setSyncConflict
+  } = useStrata();
+
+  // ==================== STATE (local to App) ====================
   
   // Editing states
   const [editingPageId, setEditingPageId] = useState(null);
@@ -90,19 +155,7 @@ function App() {
   const [mapConfigBlockId, setMapConfigBlockId] = useState(null);
   const [mapConfigPosition, setMapConfigPosition] = useState(null);
   
-  // UI states
-  const [activeTabMenu, setActiveTabMenu] = useState(null);
-  const [showAddMenu, setShowAddMenu] = useState(false);
-  const [notification, setNotification] = useState(null);
-  const [itemToDelete, setItemToDelete] = useState(null);
-  const [showSettings, setShowSettings] = useState(false);
-  
-  // Icon picker states
-  const [showIconPicker, setShowIconPicker] = useState(false);
-  const [showCoverInput, setShowCoverInput] = useState(false);
-  const [notebookIconPicker, setNotebookIconPicker] = useState(null);
-  const [tabIconPicker, setTabIconPicker] = useState(null);
-  const [pageIconPicker, setPageIconPicker] = useState(null);
+  // Icon picker search (local - picker state is in context)
   const [iconSearchTerm, setIconSearchTerm] = useState('');
   
   // Drag hover states
@@ -121,25 +174,15 @@ function App() {
   const notebookInputRefs = useRef({});
   const tabInputRefs = useRef({});
   
-  // Page type menu and Drive states
-  const [showPageTypeMenu, setShowPageTypeMenu] = useState(false);
-  const [showDriveUrlModal, setShowDriveUrlModal] = useState(false);
+  // Page type menu and Drive states (modal values - modals in context)
   const [driveUrlModalValue, setDriveUrlModalValue] = useState('');
-  const [showLucidModal, setShowLucidModal] = useState(false);
   const [lucidUrlValue, setLucidUrlValue] = useState('');
-  const [favoritesExpanded, setFavoritesExpanded] = useState(false);
   
   // Embed page states
-  const [showEditEmbed, setShowEditEmbed] = useState(false);
   const [viewedEmbedPages, setViewedEmbedPages] = useState(new Set());
   const [pageZoomLevels, setPageZoomLevels] = useState({});
   const [editEmbedName, setEditEmbedName] = useState('');
   const [editEmbedUrl, setEditEmbedUrl] = useState('');
-  
-  // Account states
-  const [showAccountPopup, setShowAccountPopup] = useState(false);
-  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
-  const [syncConflict, setSyncConflict] = useState(null);
   
   // Refs for syncing
   const syncContentDebounceRef = useRef(null);
@@ -150,52 +193,6 @@ function App() {
   const tabBarRef = useRef(null);
   const lastDropTargetRef = useRef(null);
   const dropTargetRafRef = useRef(null);
-
-  // ==================== NOTIFICATIONS ====================
-  
-  const showNotification = useCallback((message, type = 'info') => {
-    setNotification({ message, type });
-    setTimeout(() => setNotification(null), 3000);
-  }, []);
-
-  // ==================== HOOKS ====================
-  
-  // Local storage hook - manages settings and data persistence
-  const { 
-    settings, 
-    setSettings, 
-    data, 
-    setData, 
-    loadFromLocalStorage 
-  } = useLocalStorage(false, false); // We'll manage auth separately
-  
-  // Google Drive hook - manages authentication and sync
-  const {
-    isAuthenticated,
-    isLoadingAuth,
-    userEmail,
-    userName,
-    driveRootFolderId,
-    isSyncing,
-    hasUnsyncedChanges,
-    handleSignIn,
-    handleSignOut,
-    loadFromDrive,
-    triggerStructureSync,
-    triggerContentSync,
-    syncRenameToDrive,
-    queueDriveDelete,
-    hasInitialLoadCompleted
-  } = useGoogleDrive(data, setData, showNotification);
-  
-  // History hook - manages undo/redo
-  const { 
-    saveToHistory, 
-    undo, 
-    redo, 
-    canUndo, 
-    canRedo 
-  } = useHistory(data, setData, showNotification);
 
   // ==================== DERIVED STATE ====================
   
@@ -259,13 +256,13 @@ function App() {
         } catch (error) {
           console.error('Error loading from Drive:', error);
           showNotification('Failed to load from Drive. Using local data as fallback.', 'error');
-          if (DEBUG_SYNC) console.log('[Strata Sync] loadData: Drive failed, fallback to localStorage');
+          log('SYNC', 'loadData: Drive failed, fallback to localStorage');
           const localData = loadFromLocalStorage();
           if (localData?.notebooks?.length > 0) {
             setData(localData);
             setActiveFromData(localData);
           } else {
-            if (DEBUG_SYNC) console.log('[Strata Sync] loadData: localStorage empty, using INITIAL_DATA');
+            log('SYNC', 'loadData: localStorage empty, using INITIAL_DATA');
             setData(INITIAL_DATA);
             setActiveFromData(INITIAL_DATA);
           }
@@ -274,11 +271,11 @@ function App() {
         // Not signed in -- localStorage fallback
         const localData = loadFromLocalStorage();
         if (localData?.notebooks?.length > 0) {
-          if (DEBUG_SYNC) console.log('[Strata Sync] loadData: not signed in, using localStorage', { notebookCount: localData.notebooks.length });
+          log('SYNC', 'loadData: not signed in, using localStorage', { notebookCount: localData.notebooks.length });
           setData(localData);
           setActiveFromData(localData);
         } else {
-          if (DEBUG_SYNC) console.log('[Strata Sync] loadData: not signed in, localStorage empty, using INITIAL_DATA');
+          log('SYNC', 'loadData: not signed in, localStorage empty, using INITIAL_DATA');
           setData(INITIAL_DATA);
           setActiveFromData(INITIAL_DATA);
         }

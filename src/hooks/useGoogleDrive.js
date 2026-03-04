@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { APP_VERSION, DEBUG_SYNC } from '../lib/constants';
+import { APP_VERSION } from '../lib/constants';
+import { log } from '../lib/logger';
 import * as GoogleAPI from '../lib/google-api';
 import { generateOfflineViewerHtml } from '../lib/offline-viewer';
 import { reconcileData } from '../lib/reconciler';
@@ -57,7 +58,7 @@ export function useGoogleDrive(data, setData, showNotification) {
       try {
         // Check if GoogleAPI is available
         if (!GoogleAPI.loadGapi) {
-          console.warn('Google API not loaded, using localStorage fallback');
+          log('SYNC', 'Google API not loaded, using localStorage fallback');
           setIsLoadingAuth(false);
           return;
         }
@@ -74,7 +75,7 @@ export function useGoogleDrive(data, setData, showNotification) {
           setIsAuthenticated(false);
         }
       } catch (error) {
-        console.error('Error initializing Google auth:', error);
+        log('ERROR', 'Error initializing Google auth:', error);
         setIsAuthenticated(false);
       } finally {
         setIsLoadingAuth(false);
@@ -94,7 +95,7 @@ export function useGoogleDrive(data, setData, showNotification) {
       setUserName(userInfo.name || userInfo.given_name || userInfo.email);
       showNotification?.('Signed in successfully', 'success');
     } catch (error) {
-      console.error('Sign in error:', error);
+      log('ERROR', 'Sign in error:', error);
       showNotification?.('Sign in failed', 'error');
     } finally {
       setIsLoadingAuth(false);
@@ -103,7 +104,7 @@ export function useGoogleDrive(data, setData, showNotification) {
 
   // Handle sign out
   const handleSignOut = useCallback(() => {
-    if (DEBUG_SYNC) console.log('[Strata Sync] handleSignOut: clearing local storage');
+    log('SYNC', 'handleSignOut: clearing local storage');
     localStorage.removeItem('note-app-data-v1');
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
@@ -133,7 +134,7 @@ export function useGoogleDrive(data, setData, showNotification) {
         setDriveRootFolderId(rootFolderId);
         setLastSyncTime(Date.now());
       } catch (error) {
-        console.error('Error initializing Drive sync:', error);
+        log('ERROR', 'Error initializing Drive sync:', error);
       } finally {
         setIsSyncing(false);
       }
@@ -167,13 +168,13 @@ export function useGoogleDrive(data, setData, showNotification) {
 
     const syncStructure = async () => {
       if (syncLockRef.current) {
-        if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: lock held, deferring');
+        log('SYNC', 'structure sync: lock held, deferring');
         pendingSyncRef.current = true;
         return;
       }
       syncLockRef.current = true;
       const dataToSync = dataRef.current;
-      if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: start', { notebookCount: dataToSync?.notebooks?.length });
+      log('SYNC', 'structure sync: start', { notebookCount: dataToSync?.notebooks?.length });
       
       try {
         setIsSyncing(true);
@@ -186,7 +187,7 @@ export function useGoogleDrive(data, setData, showNotification) {
             try {
               await GoogleAPI.deleteDriveItem(driveId);
             } catch (error) {
-              console.error(`Error deleting Drive item ${driveId}:`, error);
+              log('ERROR', `Error deleting Drive item ${driveId}:`, error);
             }
           }
         }
@@ -201,14 +202,14 @@ export function useGoogleDrive(data, setData, showNotification) {
               notebookFolderId = await GoogleAPI.getOrCreateFolder(notebook.name, driveRootFolderId);
               driveIdUpdates[notebook.id] = { driveFolderId: notebookFolderId };
             } catch (error) {
-              console.error(`Error creating folder for notebook ${notebook.name}:`, error);
+              log('ERROR', `Error creating folder for notebook ${notebook.name}:`, error);
               continue;
             }
           } else {
             try {
               notebookFolderId = await GoogleAPI.saveFolderIdempotent(notebook.driveFolderId, notebook.name, driveRootFolderId, { icon: notebook.icon });
             } catch (error) {
-              console.error(`Error updating notebook folder ${notebook.name}:`, error);
+              log('ERROR', `Error updating notebook folder ${notebook.name}:`, error);
               notebookFolderId = notebook.driveFolderId;
             }
           }
@@ -225,14 +226,14 @@ export function useGoogleDrive(data, setData, showNotification) {
                 if (!driveIdUpdates[notebook.id].tabs) driveIdUpdates[notebook.id].tabs = {};
                 driveIdUpdates[notebook.id].tabs[tab.id] = { driveFolderId: tabFolderId };
               } catch (error) {
-                console.error(`Error creating folder for tab ${tab.name}:`, error);
+                log('ERROR', `Error creating folder for tab ${tab.name}:`, error);
                 continue;
               }
             } else {
               try {
                 tabFolderId = await GoogleAPI.saveFolderIdempotent(tab.driveFolderId, tab.name, notebookFolderId, { icon: tab.icon, tabColor: tab.color });
               } catch (error) {
-                console.error(`Error updating tab folder ${tab.name}:`, error);
+                log('ERROR', `Error updating tab folder ${tab.name}:`, error);
                 tabFolderId = tab.driveFolderId;
               }
             }
@@ -254,13 +255,13 @@ export function useGoogleDrive(data, setData, showNotification) {
                     if (!driveIdUpdates[notebook.id].tabs[tab.id].pages) driveIdUpdates[notebook.id].tabs[tab.id].pages = {};
                     driveIdUpdates[notebook.id].tabs[tab.id].pages[page.id] = { driveLinkFileId: fileId };
                   } catch (error) {
-                    console.error(`Error creating link file for page ${page.name}:`, error);
+                    log('ERROR', `Error creating link file for page ${page.name}:`, error);
                   }
                 } else {
                   try {
                     await GoogleAPI.updateFileProperties(page.driveLinkFileId, { icon: page.icon, pageType: pageType });
                   } catch (error) {
-                    console.error(`Error updating page properties ${page.name}:`, error);
+                    log('ERROR', `Error updating page properties ${page.name}:`, error);
                   }
                 }
               } else if (!page.driveFileId) {
@@ -272,13 +273,13 @@ export function useGoogleDrive(data, setData, showNotification) {
                   if (!driveIdUpdates[notebook.id].tabs[tab.id].pages) driveIdUpdates[notebook.id].tabs[tab.id].pages = {};
                   driveIdUpdates[notebook.id].tabs[tab.id].pages[page.id] = { driveFileId: fileId };
                 } catch (error) {
-                  console.error(`Error creating file for page ${page.name}:`, error);
+                  log('ERROR', `Error creating file for page ${page.name}:`, error);
                 }
               } else {
                 try {
                   await GoogleAPI.updateFileProperties(page.driveFileId, { icon: page.icon, pageType: pageType });
                 } catch (error) {
-                  console.error(`Error updating page properties ${page.name}:`, error);
+                  log('ERROR', `Error updating page properties ${page.name}:`, error);
                 }
               }
             }
@@ -287,7 +288,7 @@ export function useGoogleDrive(data, setData, showNotification) {
 
         // Apply drive ID updates
         if (Object.keys(driveIdUpdates).length > 0) {
-          if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: applying driveIdUpdates', { driveIdUpdates });
+          log('SYNC', 'structure sync: applying driveIdUpdates', { driveIdUpdates });
           setData(prev => {
             const next = { ...prev, notebooks: prev.notebooks.map(notebook => {
               const nbUpdate = driveIdUpdates[notebook.id];
@@ -356,25 +357,25 @@ export function useGoogleDrive(data, setData, showNotification) {
         }
         try {
           await GoogleAPI.saveIndexFile(driveRootFolderId, indexData);
-          if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: strata_index.json saved');
+          log('SYNC', 'structure sync: strata_index.json saved');
         } catch (error) {
-          console.error('Error saving strata_index.json:', error);
+          log('ERROR', 'Error saving strata_index.json:', error);
         }
         
         // Update manifest.json and index.html (use dataRef for latest structure)
         try {
           await GoogleAPI.updateManifest(dataRef.current, driveRootFolderId, APP_VERSION);
           await GoogleAPI.uploadIndexHtml(generateOfflineViewerHtml(), driveRootFolderId);
-          if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: manifest and index.html updated');
+          log('SYNC', 'structure sync: manifest and index.html updated');
         } catch (error) {
-          console.error('Error updating manifest/index.html:', error);
+          log('ERROR', 'Error updating manifest/index.html:', error);
         }
         
         localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current.notebooks));
         setLastSyncTime(Date.now());
-        if (DEBUG_SYNC) console.log('[Strata Sync] structure sync: complete');
+        log('SYNC', 'structure sync: complete');
       } catch (error) {
-        console.error('Error syncing structure:', error);
+        log('ERROR', 'Error syncing structure:', error);
       } finally {
         setIsSyncing(false);
         setHasUnsyncedChanges(false);
@@ -406,12 +407,12 @@ export function useGoogleDrive(data, setData, showNotification) {
     
     const syncContent = async () => {
       if (syncLockRef.current) {
-        if (DEBUG_SYNC) console.log('[Strata Sync] content sync: structure lock held, deferring');
+        log('SYNC', 'content sync: structure lock held, deferring');
         pendingContentSyncRef.current = true;
         return;
       }
       setIsSyncing(true);
-      if (DEBUG_SYNC) console.log('[Strata Sync] content sync: start');
+      log('SYNC', 'content sync: start');
       
       try {
         const dataToSync = dataRef.current;
@@ -434,8 +435,8 @@ export function useGoogleDrive(data, setData, showNotification) {
                   await GoogleAPI.syncPageToDrive(page, tabFolderId);
                   pagesSynced++;
                 } catch (error) {
-                  console.error(`Error updating page content ${page.name}:`, error);
-                  if (DEBUG_SYNC) console.log('[Strata Sync] content sync: error', { page: page.name, error: error?.message });
+                  log('ERROR', `Error updating page content ${page.name}:`, error);
+                  log('SYNC', 'content sync: error', { page: page.name, error: error?.message });
                 }
               }
               // Sync Google/embed page link (embedUrl, webViewLink) when edit/preview mode changes
@@ -444,7 +445,7 @@ export function useGoogleDrive(data, setData, showNotification) {
                   await GoogleAPI.syncGooglePageLink(page, tabFolderId);
                   pagesSynced++;
                 } catch (error) {
-                  console.error(`Error syncing Google page link ${page.name}:`, error);
+                  log('ERROR', `Error syncing Google page link ${page.name}:`, error);
                 }
               }
             }
@@ -453,7 +454,7 @@ export function useGoogleDrive(data, setData, showNotification) {
         dirtyPagesRef.current.clear();
         localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current.notebooks));
         lastContentSyncRef.current = Date.now();
-        if (DEBUG_SYNC) console.log('[Strata Sync] content sync: complete', { pagesSynced });
+        log('SYNC', 'content sync: complete', { pagesSynced });
       } finally {
         setIsSyncing(false);
         setHasUnsyncedChanges(false);
@@ -503,18 +504,18 @@ export function useGoogleDrive(data, setData, showNotification) {
             }
           } catch (e) { /* ignore */ }
         }
-        if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: cache check', { cacheKey, hasCached: !!cached, cachedNotebookCount: cached?.data?.notebooks?.length });
+        log('SYNC', 'loadFromDrive: cache check', { cacheKey, hasCached: !!cached, cachedNotebookCount: cached?.data?.notebooks?.length });
       }
 
       // Get root folder
       const rootFolderId = await GoogleAPI.getOrCreateRootFolder();
-      if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: root folder', { rootFolderId });
+      log('SYNC', 'loadFromDrive: root folder', { rootFolderId });
       
       // Load from Drive
       const driveData = await GoogleAPI.loadFromDriveStructure(rootFolderId);
       
       if (driveData && driveData.notebooks) {
-        if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: loaded from Drive', { notebookCount: driveData.notebooks.length });
+        log('SYNC', 'loadFromDrive: loaded from Drive', { notebookCount: driveData.notebooks.length });
         const reconciled = reconcileData(driveData);
         setDriveRootFolderId(rootFolderId);
         // Cache the data
@@ -530,19 +531,19 @@ export function useGoogleDrive(data, setData, showNotification) {
       }
       
       if (cached?.data) {
-        if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: using cached data', { notebookCount: cached.data.notebooks?.length });
+        log('SYNC', 'loadFromDrive: using cached data', { notebookCount: cached.data.notebooks?.length });
         const reconciled = reconcileData(cached.data);
         setDriveRootFolderId(rootFolderId);
         setHasInitialLoadCompleted(true);
         return reconciled;
       }
       
-      if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDrive: Drive empty or failed');
+      log('SYNC', 'loadFromDrive: Drive empty or failed');
       setDriveRootFolderId(rootFolderId);
       setHasInitialLoadCompleted(true);
       return null;
     } catch (error) {
-      console.error('Error loading from Drive:', error);
+      log('ERROR', 'Error loading from Drive:', error);
       if (error.message?.includes('Authentication')) {
         showNotification?.('Authentication expired. Please sign in again.', 'error');
       }
@@ -562,7 +563,7 @@ export function useGoogleDrive(data, setData, showNotification) {
         try {
           await GoogleAPI.renameDriveItem(nb.driveFolderId, GoogleAPI.sanitizeFileName(nb.name));
         } catch (err) {
-          console.error('Error updating notebook folder:', err);
+          log('ERROR', 'Error updating notebook folder:', err);
         }
         triggerStructureSync();
         return;
@@ -572,7 +573,7 @@ export function useGoogleDrive(data, setData, showNotification) {
           try {
             await GoogleAPI.renameDriveItem(tab.driveFolderId, GoogleAPI.sanitizeFileName(tab.name));
           } catch (err) {
-            console.error('Error updating tab folder:', err);
+            log('ERROR', 'Error updating tab folder:', err);
           }
           triggerStructureSync();
           return;
@@ -583,14 +584,14 @@ export function useGoogleDrive(data, setData, showNotification) {
               try {
                 await GoogleAPI.renameDriveItem(pg.driveFileId, GoogleAPI.sanitizeFileName(pg.name) + '.json');
               } catch (err) {
-                console.error('Error updating page file:', err);
+                log('ERROR', 'Error updating page file:', err);
               }
             }
             if (pg.driveShortcutId) {
               try {
                 await GoogleAPI.renameDriveItem(pg.driveShortcutId, pg.name);
               } catch (err) {
-                console.error('Error updating page shortcut:', err);
+                log('ERROR', 'Error updating page shortcut:', err);
               }
             }
             triggerContentSync(id);

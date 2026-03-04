@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useRef } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useGoogleDrive } from '../hooks/useGoogleDrive';
 import { useHistory } from '../hooks/useHistory';
@@ -60,6 +60,42 @@ export function StrataProvider({ children }) {
   const [showLucidModal, setShowLucidModal] = useState(false);
   const [favoritesExpanded, setFavoritesExpanded] = useState(false);
   const [syncConflict, setSyncConflict] = useState(null);
+
+  // Editing states
+  const [editingPageId, setEditingPageId] = useState(null);
+  const [editingTabId, setEditingTabId] = useState(null);
+  const [editingNotebookId, setEditingNotebookId] = useState(null);
+
+  // Block/editor states
+  const [draggedBlock, setDraggedBlock] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const [activePageRows, setActivePageRows] = useState(null);
+  const [autoFocusId, setAutoFocusId] = useState(null);
+  const [selectedBlockId, setSelectedBlockId] = useState(null);
+  const [blockMenu, setBlockMenu] = useState(null);
+  const [mapConfigBlockId, setMapConfigBlockId] = useState(null);
+  const [mapConfigPosition, setMapConfigPosition] = useState(null);
+
+  // Modal input values
+  const [iconSearchTerm, setIconSearchTerm] = useState('');
+  const [driveUrlModalValue, setDriveUrlModalValue] = useState('');
+  const [lucidUrlValue, setLucidUrlValue] = useState('');
+  const [editEmbedName, setEditEmbedName] = useState('');
+  const [editEmbedUrl, setEditEmbedUrl] = useState('');
+
+  // Other UI
+  const [viewedEmbedPages, setViewedEmbedPages] = useState(new Set());
+  const [dragHoverTarget, setDragHoverTarget] = useState(null);
+  const [creationFlow, setCreationFlow] = useState(null);
+  const [shouldFocusTitle, setShouldFocusTitle] = useState(false);
+
+  // Refs (stable, passed in context)
+  const notebookInputRefs = useRef({});
+  const tabInputRefs = useRef({});
+  const tabBarRef = useRef(null);
+  const titleInputRef = useRef(null);
+  const shouldFocusPageRef = useRef(false);
+  const dragHoverTimerRef = useRef(null);
 
   const value = {
     // Data & persistence
@@ -134,7 +170,58 @@ export function StrataProvider({ children }) {
     favoritesExpanded,
     setFavoritesExpanded,
     syncConflict,
-    setSyncConflict
+    setSyncConflict,
+    // Editing states
+    editingPageId,
+    setEditingPageId,
+    editingTabId,
+    setEditingTabId,
+    editingNotebookId,
+    setEditingNotebookId,
+    // Block/editor states
+    draggedBlock,
+    setDraggedBlock,
+    dropTarget,
+    setDropTarget,
+    activePageRows,
+    setActivePageRows,
+    autoFocusId,
+    setAutoFocusId,
+    selectedBlockId,
+    setSelectedBlockId,
+    blockMenu,
+    setBlockMenu,
+    mapConfigBlockId,
+    setMapConfigBlockId,
+    mapConfigPosition,
+    setMapConfigPosition,
+    // Modal input values
+    iconSearchTerm,
+    setIconSearchTerm,
+    driveUrlModalValue,
+    setDriveUrlModalValue,
+    lucidUrlValue,
+    setLucidUrlValue,
+    editEmbedName,
+    setEditEmbedName,
+    editEmbedUrl,
+    setEditEmbedUrl,
+    // Other UI
+    viewedEmbedPages,
+    setViewedEmbedPages,
+    dragHoverTarget,
+    setDragHoverTarget,
+    creationFlow,
+    setCreationFlow,
+    shouldFocusTitle,
+    setShouldFocusTitle,
+    // Refs
+    notebookInputRefs,
+    tabInputRefs,
+    tabBarRef,
+    titleInputRef,
+    shouldFocusPageRef,
+    dragHoverTimerRef
   };
 
   return <StrataContext.Provider value={value}>{children}</StrataContext.Provider>;

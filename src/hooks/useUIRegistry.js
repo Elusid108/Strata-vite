@@ -1,29 +1,32 @@
 import { useEffect } from 'react';
+import { useStrata } from '../contexts/StrataContext';
 
 /**
  * Hook for ephemeral UI handler logic: the global click-outside listener
  * that closes icon pickers, tab settings menus, and other popups.
  */
-export function useUIRegistry({
-  setActiveTabMenu,
-  setShowAddMenu,
-  setSelectedBlockId,
-  setBlockMenu,
-  editingTabId,
-  editingNotebookId,
-  editingPageId,
-  setEditingTabId,
-  setEditingNotebookId,
-  setEditingPageId,
-  setShowIconPicker,
-  setShowCoverInput,
-  setNotebookIconPicker,
-  setTabIconPicker,
-  setPageIconPicker,
-  setIconSearchTerm,
-  setShowSettings,
-  setShowPageTypeMenu
-}) {
+export function useUIRegistry() {
+  const {
+    setActiveTabMenu,
+    setShowAddMenu,
+    setSelectedBlockId,
+    setBlockMenu,
+    editingTabId,
+    editingNotebookId,
+    editingPageId,
+    setEditingTabId,
+    setEditingNotebookId,
+    setEditingPageId,
+    setShowIconPicker,
+    setShowCoverInput,
+    setNotebookIconPicker,
+    setTabIconPicker,
+    setPageIconPicker,
+    setIconSearchTerm,
+    setShowSettings,
+    setShowPageTypeMenu,
+  } = useStrata();
+
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (!e.target.closest('.tab-settings-trigger') && !e.target.closest('.tab-settings-menu')) setActiveTabMenu(null);
@@ -72,6 +75,6 @@ export function useUIRegistry({
     setPageIconPicker,
     setIconSearchTerm,
     setShowSettings,
-    setShowPageTypeMenu
+    setShowPageTypeMenu,
   ]);
 }

@@ -22,41 +22,11 @@ import {
 } from '../../components/icons';
 import { MapConfigPopup } from '../pages';
 import { useStrata } from '../../contexts/StrataContext';
+import { usePageContent } from '../../hooks/usePageContent';
+import { useBlockEditor } from '../../hooks/useBlockEditor';
+import { useAppActions } from '../../hooks/useAppActions';
 
-export function ModalsContainer({
-  rowsForEditor,
-  updateTabColor,
-  changeBlockType,
-  updateBlockColor,
-  handleUpdateBlock,
-  updatePageCover,
-  updateNotebookIcon,
-  updateTabIcon,
-  updatePageIcon,
-  confirmDelete,
-  addEmbedPageFromUrl,
-  addGooglePage,
-  addLucidPage,
-  showNotification,
-  driveUrlModalValue,
-  setDriveUrlModalValue,
-  lucidUrlValue,
-  setLucidUrlValue,
-  editEmbedName,
-  setEditEmbedName,
-  editEmbedUrl,
-  setEditEmbedUrl,
-  iconSearchTerm,
-  setIconSearchTerm,
-  mapConfigBlockId,
-  mapConfigPosition,
-  setMapConfigBlockId,
-  setMapConfigPosition,
-  blockMenu,
-  setBlockMenu,
-  activePageId,
-  triggerContentSync,
-}) {
+export function ModalsContainer() {
   const {
     settings,
     setSettings,
@@ -89,10 +59,42 @@ export function ModalsContainer({
     data,
     activeNotebookId,
     activeTabId,
+    activePageId,
     isAuthenticated,
     hasInitialLoadCompleted,
     notification,
+    showNotification,
+    driveUrlModalValue,
+    setDriveUrlModalValue,
+    lucidUrlValue,
+    setLucidUrlValue,
+    editEmbedName,
+    setEditEmbedName,
+    editEmbedUrl,
+    setEditEmbedUrl,
+    iconSearchTerm,
+    setIconSearchTerm,
+    mapConfigBlockId,
+    mapConfigPosition,
+    setMapConfigBlockId,
+    setMapConfigPosition,
+    blockMenu,
+    setBlockMenu,
+    triggerContentSync,
   } = useStrata();
+
+  const { rowsForEditor } = usePageContent();
+  const { changeBlockType, updateBlockColor, handleUpdateBlock, updatePageCover } = useBlockEditor();
+  const {
+    updateTabColor,
+    updateNotebookIcon,
+    updateTabIcon,
+    updatePageIcon,
+    confirmDelete,
+    addEmbedPageFromUrl,
+    addGooglePage,
+    addLucidPage,
+  } = useAppActions();
 
   return (
     <>

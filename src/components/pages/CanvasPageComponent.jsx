@@ -109,7 +109,7 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     return () => {
       if (onUpdateTimeoutRef.current) clearTimeout(onUpdateTimeoutRef.current);
     };
-  }, [containers, paths, pageTitle, page.id]); // REMOVED transform from dependencies
+  }, [containers, paths, pageTitle, page.id, transform]);
 
   // History management
   const pushToHistory = () => {

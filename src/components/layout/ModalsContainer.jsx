@@ -45,6 +45,7 @@ export function ModalsContainer() {
     setItemToDelete,
     activeTabMenu,
     itemToDelete,
+    showSignOutConfirm,
     setShowSignOutConfirm,
     handleSignOut,
     syncConflict,

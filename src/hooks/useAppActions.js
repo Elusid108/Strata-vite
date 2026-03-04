@@ -571,42 +571,88 @@ export function useAppActions() {
     [setData]
   );
 
+  const handleNavDragStart = useCallback((e, type, id, index) => {
+    e.dataTransfer.setData('nav_drag', JSON.stringify({
+      type,
+      id,
+      index,
+      sourceNotebookId: activeNotebookId,
+      sourceTabId: activeTabId
+    }));
+  }, [activeNotebookId, activeTabId]);
+
   const handleNavDrop = useCallback(
-    (e, type, targetIndex) => {
+    (e, dropType, targetIndex, targetId) => {
       e.preventDefault();
       e.stopPropagation();
       if (dragHoverTimerRef?.current) clearTimeout(dragHoverTimerRef.current);
       setDragHoverTarget(null);
+
       const dragDataRaw = e.dataTransfer.getData('nav_drag');
       if (!dragDataRaw) return;
       const dragData = JSON.parse(dragDataRaw);
+
       saveToHistory();
       const newData = JSON.parse(JSON.stringify(data));
-      if (type === 'notebook') {
-        if (dragData.type !== 'notebook' || dragData.index === targetIndex) return;
-        const item = newData.notebooks.splice(dragData.index, 1)[0];
-        newData.notebooks.splice(targetIndex, 0, item);
-      } else if (type === 'tab') {
-        if (dragData.type !== 'tab') return;
-        const sourceNb = newData.notebooks.find((n) => n.id === dragData.sourceNotebookId);
-        const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
-        if (sourceNb && targetNb) {
-          const [movedTab] = sourceNb.tabs.splice(dragData.index, 1);
-          targetNb.tabs.splice(targetIndex, 0, movedTab);
+      let changed = false;
+
+      const sourceNb = newData.notebooks.find((n) => n.id === dragData.sourceNotebookId);
+      const sourceTab = sourceNb?.tabs.find((t) => t.id === dragData.sourceTabId);
+
+      if (dragData.type === 'notebook' && dropType === 'notebook') {
+        if (dragData.index !== targetIndex) {
+          const [movedNb] = newData.notebooks.splice(dragData.index, 1);
+          newData.notebooks.splice(targetIndex, 0, movedNb);
+          changed = true;
         }
-      } else if (type === 'page') {
-        if (dragData.type !== 'page') return;
-        const sourceNb = newData.notebooks.find((n) => n.id === dragData.sourceNotebookId);
-        const sourceTab = sourceNb?.tabs.find((t) => t.id === dragData.sourceTabId);
-        const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
-        const targetTab = targetNb?.tabs.find((t) => t.id === activeTabId);
-        if (sourceTab && targetTab) {
-          const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
-          targetTab.pages.splice(targetIndex, 0, movedPage);
+      } else if (dragData.type === 'tab') {
+        if (dropType === 'tab') {
+          const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
+          if (sourceNb && targetNb && sourceNb.id === targetNb.id) {
+            const [movedTab] = sourceNb.tabs.splice(dragData.index, 1);
+            targetNb.tabs.splice(targetIndex, 0, movedTab);
+            changed = true;
+          }
+        } else if (dropType === 'notebook') {
+          const targetNb = newData.notebooks.find((n) => n.id === targetId);
+          if (sourceNb && targetNb && sourceNb.id !== targetNb.id) {
+            const [movedTab] = sourceNb.tabs.splice(dragData.index, 1);
+            targetNb.tabs.push(movedTab);
+            changed = true;
+          }
+        }
+      } else if (dragData.type === 'page') {
+        if (dropType === 'page') {
+          const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
+          const targetTab = targetNb?.tabs.find((t) => t.id === activeTabId);
+          if (sourceTab && targetTab && sourceTab.id === targetTab.id) {
+            const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
+            targetTab.pages.splice(targetIndex, 0, movedPage);
+            changed = true;
+          }
+        } else if (dropType === 'tab') {
+          const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
+          const targetTab = targetNb?.tabs.find((t) => t.id === targetId);
+          if (sourceTab && targetTab && sourceTab.id !== targetTab.id) {
+            const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
+            targetTab.pages.push(movedPage);
+            changed = true;
+          }
+        } else if (dropType === 'notebook') {
+          const targetNb = newData.notebooks.find((n) => n.id === targetId);
+          const targetTab = targetNb?.tabs.find((t) => t.id === targetNb.activeTabId) || targetNb?.tabs[0];
+          if (sourceTab && targetTab && sourceTab.id !== targetTab.id) {
+            const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
+            targetTab.pages.push(movedPage);
+            changed = true;
+          }
         }
       }
-      setData(newData);
-      triggerStructureSync();
+
+      if (changed) {
+        setData(newData);
+        triggerStructureSync();
+      }
     },
     [saveToHistory, data, setData, activeNotebookId, activeTabId, triggerStructureSync, setDragHoverTarget, dragHoverTimerRef]
   );
@@ -767,6 +813,7 @@ export function useAppActions() {
     confirmDelete,
     updateLocalName,
     toggleStar,
+    handleNavDragStart,
     handleNavDrop,
     handleFavoriteDrop,
     selectNotebook,

@@ -2116,12 +2116,18 @@ const loadFromDriveStructure = async (rootFolderId) => {
                         page.databaseData = pageContent.databaseData;
                     }
                     
-                    // Apply Google page link data when type matches or content has embedUrl/driveFileId
-                    if (googleTypes.includes(pageType) || pageContent.embedUrl || pageContent.driveFileId) {
+                    // Always apply embed URLs if they exist in the JSON content, regardless of the explicit type string.
+                    if (pageContent.embedUrl || pageContent.originalUrl || pageContent.webViewLink || googleTypes.includes(pageType)) {
                         page.embedUrl = pageContent.embedUrl || page.embedUrl;
+                        page.originalUrl = pageContent.originalUrl || page.originalUrl;
                         page.webViewLink = pageContent.webViewLink || page.webViewLink;
                         page.driveLinkFileId = page.driveFileId; // page JSON file ID
                         page.driveFileId = pageContent.driveFileId || page.driveFileId; // linked Google file ID
+                        
+                        // Force the type to lucidchart if the URL matches, just in case metadata was lost
+                        if (page.embedUrl && page.embedUrl.includes('lucid.app')) {
+                            page.type = 'lucidchart';
+                        }
                     }
                 }
             }

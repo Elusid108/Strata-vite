@@ -182,7 +182,7 @@ export function Sidebar() {
               draggable={!editingNotebookId}
               onDragStart={(e) => handleNavDragStart(e, 'notebook', notebook.id, index)}
               onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => handleNavDrop(e, 'notebook', index)}
+              onDrop={(e) => handleNavDrop(e, 'notebook', index, notebook.id)}
               onClick={() => selectNotebook(notebook.id)}
               className={`group flex items-center ${settings.condensedView ? 'justify-center' : 'gap-2'} p-2 rounded cursor-pointer mb-1 ${
                 activeNotebookId === notebook.id ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'hover:bg-gray-200 dark:hover:bg-gray-700'

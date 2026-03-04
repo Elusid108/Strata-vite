@@ -57,7 +57,7 @@ export function NavigationRail({ children }) {
                 draggable={!editingTabId}
                 onDragStart={(e) => handleNavDragStart(e, 'tab', tab.id, index)}
                 onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => handleNavDrop(e, 'tab', index)}
+                onDrop={(e) => handleNavDrop(e, 'tab', index, tab.id)}
                 onClick={() => selectTab(tab.id)}
                 className={`group flex items-center gap-2 ${settings.condensedView ? 'px-2' : 'px-3'} py-1.5 rounded-t text-sm cursor-pointer transition-colors ${getTabColorClasses(tab.color || 'gray', activeTabId === tab.id)}`}
                 title={settings.condensedView ? tab.name : undefined}
@@ -211,7 +211,7 @@ export function NavigationRail({ children }) {
                   draggable={!editingPageId}
                   onDragStart={(e) => handleNavDragStart(e, 'page', page.id, index)}
                   onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => handleNavDrop(e, 'page', index)}
+                  onDrop={(e) => handleNavDrop(e, 'page', index, page.id)}
                   onClick={() => {
                     if (activePageId !== page.id) selectPage(page.id);
                   }}

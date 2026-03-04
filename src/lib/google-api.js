@@ -2081,7 +2081,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
                     }
                     
                     // Derive page type from content when file properties lack it (fix for existing link files)
-                    const googleTypes = ['doc', 'sheet', 'slide', 'pdf', 'drive', 'lucidchart'];
+                    const googleTypes = ['doc', 'sheet', 'slide', 'pdf', 'drive', 'lucidchart', 'miro', 'drawio'];
                     const contentType = googleTypes.includes(pageContent.type) ? pageContent.type : null;
                     const pageType = contentType || page.type;
                     if (contentType) page.type = contentType;
@@ -2124,9 +2124,11 @@ const loadFromDriveStructure = async (rootFolderId) => {
                         page.driveLinkFileId = page.driveFileId; // page JSON file ID
                         page.driveFileId = pageContent.driveFileId || page.driveFileId; // linked Google file ID
                         
-                        // Force the type to lucidchart if the URL matches, just in case metadata was lost
-                        if (page.embedUrl && page.embedUrl.includes('lucid.app')) {
-                            page.type = 'lucidchart';
+                        // Force the type from URL if metadata was lost
+                        if (page.embedUrl) {
+                            if (page.embedUrl.includes('lucid.app')) page.type = 'lucidchart';
+                            else if (page.embedUrl.includes('miro.com')) page.type = 'miro';
+                            else if (page.embedUrl.includes('draw.io') || page.embedUrl.includes('diagrams.net')) page.type = 'drawio';
                         }
                     }
                 }
@@ -2970,7 +2972,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '3.1.0',
+            version: appVersion || '3.3.1',
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

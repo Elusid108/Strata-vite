@@ -8,6 +8,9 @@ import { GoogleDrawingEmbed } from './GoogleDrawingEmbed';
 import { GoogleVidEmbed } from './GoogleVidEmbed';
 import { PdfEmbed } from './PdfEmbed';
 import { GenericDriveEmbed } from './GenericDriveEmbed';
+import { LucidchartEmbed } from './LucidchartEmbed';
+import { MiroEmbed } from './MiroEmbed';
+import { DrawIoEmbed } from './DrawIoEmbed';
 
 /**
  * Main embed page component that routes to the correct service-specific component
@@ -77,10 +80,15 @@ export function EmbedPage({
         return <GoogleVidEmbed page={page} />;
       case 'pdf':
         return <PdfEmbed page={page} />;
+      case 'miro':
+        return <MiroEmbed page={page} />;
+      case 'drawio':
+        return <DrawIoEmbed page={page} />;
+      case 'lucidchart':
+        return <LucidchartEmbed page={page} />;
       case 'site':
       case 'script':
       case 'drive':
-      case 'lucidchart':
       default:
         return <GenericDriveEmbed page={page} />;
     }

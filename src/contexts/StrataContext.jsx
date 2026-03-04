@@ -57,7 +57,6 @@ export function StrataProvider({ children }) {
   const [tabIconPicker, setTabIconPicker] = useState(null);
   const [pageIconPicker, setPageIconPicker] = useState(null);
   const [showEditEmbed, setShowEditEmbed] = useState(false);
-  const [showLucidModal, setShowLucidModal] = useState(false);
   const [favoritesExpanded, setFavoritesExpanded] = useState(false);
   const [syncConflict, setSyncConflict] = useState(null);
 
@@ -79,7 +78,6 @@ export function StrataProvider({ children }) {
   // Modal input values
   const [iconSearchTerm, setIconSearchTerm] = useState('');
   const [driveUrlModalValue, setDriveUrlModalValue] = useState('');
-  const [lucidUrlValue, setLucidUrlValue] = useState('');
   const [editEmbedName, setEditEmbedName] = useState('');
   const [editEmbedUrl, setEditEmbedUrl] = useState('');
 
@@ -165,8 +163,6 @@ export function StrataProvider({ children }) {
     setPageIconPicker,
     showEditEmbed,
     setShowEditEmbed,
-    showLucidModal,
-    setShowLucidModal,
     favoritesExpanded,
     setFavoritesExpanded,
     syncConflict,
@@ -200,8 +196,6 @@ export function StrataProvider({ children }) {
     setIconSearchTerm,
     driveUrlModalValue,
     setDriveUrlModalValue,
-    lucidUrlValue,
-    setLucidUrlValue,
     editEmbedName,
     setEditEmbedName,
     editEmbedUrl,

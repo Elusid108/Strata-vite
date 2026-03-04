@@ -2,6 +2,15 @@
 // Extracted from Strata index.html Section F
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+
+const formatTimestamp = (ts) => {
+  if (!ts) return null;
+  const d = new Date(ts);
+  return {
+    date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    time: d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  };
+};
 import { generateId, getFormattedDate } from '../../lib/utils';
 import { EMOJIS } from '../../lib/constants';
 import {
@@ -852,10 +861,18 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
                    className="text-5xl font-light text-gray-800 dark:text-gray-200 bg-transparent border-none outline-none w-full placeholder-gray-300 dark:placeholder-gray-500"
                    placeholder="Page Title"
                  />
-                 <div className="text-sm text-gray-400 dark:text-gray-500 mt-2 flex gap-4">
-                   <span>{currentDate.date}</span>
-                   <span>{currentDate.time}</span>
-                 </div>
+                 {page.createdAt && (
+                   <div className="text-sm text-gray-400 dark:text-gray-500 mt-2 flex gap-4">
+                     <span>{formatTimestamp(page.createdAt).date}</span>
+                     <span>{formatTimestamp(page.createdAt).time}</span>
+                   </div>
+                 )}
+                 {!page.createdAt && (
+                   <div className="text-sm text-gray-400 dark:text-gray-500 mt-2 flex gap-4">
+                     <span>{currentDate.date}</span>
+                     <span>{currentDate.time}</span>
+                   </div>
+                 )}
                </div>
              </div>
            </div>

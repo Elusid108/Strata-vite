@@ -10,6 +10,7 @@ Created by **Chris Moore Designs LLC**.
 
 ### 🏗️ Deep Organization
 * **Hierarchy:** Structure your life using a nested system of **Notebooks > Tabs > Pages**.
+* **Creation Timestamps:** Pages now display their original creation timestamps for better organization.
 * **Drag & Drop:** Fully sortable navigation. Rearrange your notebooks, tabs, pages, and favorites on the fly.
 * **Customization:** Personalize your workspace with searchable custom icons and tab colors.
 * **Persistent State:** Strata remembers exactly where you left off. Switching between notebooks instantly restores your last viewed tab and page.
@@ -23,6 +24,7 @@ Created by **Chris Moore Designs LLC**.
 * **Map Pages:** Interactive geographic maps with custom pins, locked views, and spatial data tracking.
 
 ### 🔗 Deep Google Drive Integration
+* **Unified Embed Engine:** Paste links to seamlessly embed Google Drive files (Docs, Sheets, Slides, Forms, etc.), PDFs, Lucidchart diagrams, Miro boards, and Draw.io canvases directly into your workspace.
 * **Native Embeds:** Embed Google Docs, Sheets, Slides, Forms, Drawings, Videos, and PDFs directly into your notebooks.
 * **Background Tabs:** Embedded pages remain alive in the background when navigating away, ensuring instant load times and preserved state (like switching Chrome tabs) when you return.
 * **Drive File Blocks:** Link directly to Drive files within your block pages, displaying real-time file names, types, and open/remove controls.

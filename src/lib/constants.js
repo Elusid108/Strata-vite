@@ -1,5 +1,5 @@
 // --- App Version ---
-export const APP_VERSION = "3.2.0";
+export const APP_VERSION = "3.3.1";
 
 // --- Debug ---
 export const DEBUG_SYNC = import.meta.env.VITE_STRATA_DEBUG_SYNC === 'true';
@@ -73,6 +73,8 @@ export const DRIVE_SERVICE_ICONS = [
   { type: 'site', name: 'Google Sites', url: 'https://drive-thirdparty.googleusercontent.com/128/type/application%2Fvnd.google-apps.site' },
   { type: 'script', name: 'Apps Script', url: 'https://drive-thirdparty.googleusercontent.com/128/type/application%2Fvnd.google-apps.script' },
   { type: 'lucidchart', name: 'Lucidchart', url: 'https://www.google.com/s2/favicons?domain=lucid.app&sz=128' },
+  { type: 'miro', name: 'Miro', url: 'https://www.google.com/s2/favicons?domain=miro.com&sz=128' },
+  { type: 'drawio', name: 'Draw.io', url: 'https://www.google.com/s2/favicons?domain=draw.io&sz=128' },
 ];
 
 // --- Emojis ---

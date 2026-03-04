@@ -1,4 +1,13 @@
 import { getPickerPosition, getActiveContext } from '../../lib/utils';
+
+const formatTimestamp = (ts) => {
+  if (!ts) return null;
+  const d = new Date(ts);
+  return {
+    date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    time: d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  };
+};
 import { countBlocksInTree } from '../../lib/tree-operations';
 import { Book, Plus, Trash2 } from '../../components/icons';
 import { BlockComponent } from '../blocks';
@@ -62,6 +71,7 @@ export function PageRenderer() {
   } = useAppActions();
 
   const { page: activePage } = getActiveContext(data, activeNotebookId, activeTabId, activePageId);
+  const createdAtInfo = activePage?.createdAt ? formatTimestamp(activePage.createdAt) : null;
 
   const totalBlocks = pageTree ? countBlocksInTree(pageTree) : 0;
 
@@ -145,7 +155,7 @@ export function PageRenderer() {
               saveToHistory={saveToHistory}
               showNotification={showNotification}
             />
-          ) : ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'site', 'script', 'drive', 'lucidchart'].includes(activePage.type) ? (
+          ) : ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'site', 'script', 'drive', 'lucidchart', 'miro', 'drawio'].includes(activePage.type) ? (
             <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-500 dark:text-gray-400 p-8">
               <div className="text-6xl">{activePage.icon || '📄'}</div>
               <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300">{activePage.name}</h2>
@@ -165,6 +175,10 @@ export function PageRenderer() {
                   ? 'Google Video'
                   : activePage.type === 'pdf'
                   ? 'PDF'
+                  : activePage.type === 'miro'
+                  ? 'Miro Board'
+                  : activePage.type === 'drawio'
+                  ? 'Draw.io Diagram'
                   : 'embedded file'}{' '}
                 needs to be re-linked. The original file reference was lost during sync.
               </p>
@@ -216,14 +230,22 @@ export function PageRenderer() {
                       >
                         {activePage.icon || '📄'}
                       </span>
-                      <input
-                        ref={titleInputRef}
-                        className="flex-1 text-3xl font-bold bg-transparent outline-none"
-                        value={activePage.name}
-                        onChange={(e) => updateLocalName('page', activePage.id, e.target.value)}
-                        onBlur={() => syncRenameToDrive('page', activePage.id)}
-                        placeholder="Untitled"
-                      />
+                      <div className="flex-1 min-w-0">
+                        <input
+                          ref={titleInputRef}
+                          className="w-full text-3xl font-bold bg-transparent outline-none"
+                          value={activePage.name}
+                          onChange={(e) => updateLocalName('page', activePage.id, e.target.value)}
+                          onBlur={() => syncRenameToDrive('page', activePage.id)}
+                          placeholder="Untitled"
+                        />
+                        {createdAtInfo && (
+                          <div className="text-sm text-gray-400 dark:text-gray-500 mt-1 flex gap-4">
+                            <span>{createdAtInfo.date}</span>
+                            <span>{createdAtInfo.time}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="space-y-2" onDrop={handleDrop} onDragEnd={handleBlockDragEnd}>

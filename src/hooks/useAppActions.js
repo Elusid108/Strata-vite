@@ -277,18 +277,22 @@ export function useAppActions() {
       if (!activeTabId || !rawUrl) return false;
       const parsed = parseEmbedUrl(rawUrl);
       if (!parsed) {
-        showNotification('Could not parse Google Drive or PDF URL', 'error');
+        showNotification('Could not parse Google Drive, PDF, or Web Board URL', 'error');
         return false;
       }
       saveToHistory();
+      const pageName = parsed.isGoogleService
+        ? (parsed.type === 'site' ? 'Google Site' : `Google ${parsed.typeName}`)
+        : parsed.typeName;
       const newPage = {
         id: generateId(),
-        name: parsed.type === 'site' ? 'Google Site' : `Google ${parsed.typeName}`,
+        name: pageName,
         type: parsed.type,
         embedUrl: parsed.embedUrl,
         ...(parsed.fileId && { driveFileId: parsed.fileId }),
         webViewLink: rawUrl,
-        ...(parsed.type === 'pdf' && !parsed.fileId && { originalUrl: rawUrl }),
+        ...(parsed.originalUrl && { originalUrl: parsed.originalUrl }),
+        ...(parsed.type === 'pdf' && !parsed.fileId && !parsed.originalUrl && { originalUrl: rawUrl }),
         icon: parsed.icon,
         createdAt: Date.now(),
       };
@@ -300,30 +304,10 @@ export function useAppActions() {
       };
       setData(newData);
       setActivePageId(newPage.id);
-      showNotification(`Google ${parsed.typeName} added`, 'success');
+      showNotification(`${pageName} added`, 'success');
       triggerStructureSync();
       triggerContentSync(newPage.id);
       return true;
-    },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
-  );
-
-  const addLucidPage = useCallback(
-    (url) => {
-      if (!activeTabId || !url) return;
-      saveToHistory();
-      const newPage = { id: generateId(), name: 'Lucidchart', type: 'lucidchart', embedUrl: url, icon: '📊', createdAt: Date.now() };
-      const newData = {
-        ...data,
-        notebooks: data.notebooks.map((nb) =>
-          nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== activeTabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })) }
-        ),
-      };
-      setData(newData);
-      setActivePageId(newPage.id);
-      showNotification('Lucidchart added', 'success');
-      triggerStructureSync();
-      triggerContentSync(newPage.id);
     },
     [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
   );
@@ -424,7 +408,7 @@ export function useAppActions() {
       let nextId = null;
       const driveIdsToDelete = [];
       const getPageDeleteId = (page) => {
-        const isEmbed = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'site', 'script', 'drive', 'lucidchart'].includes(page.type);
+        const isEmbed = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'site', 'script', 'drive', 'lucidchart', 'miro', 'drawio'].includes(page.type);
         return page.driveLinkFileId || (!isEmbed ? page.driveFileId : null);
       };
       const collectDriveIds = (item, itemType) => {
@@ -807,7 +791,6 @@ export function useAppActions() {
     addDatabasePage,
     addCodePage,
     addEmbedPageFromUrl,
-    addLucidPage,
     addGooglePage,
     executeDelete,
     confirmDelete,

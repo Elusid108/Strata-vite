@@ -8,3 +8,6 @@ export { GoogleDrawingEmbed } from './GoogleDrawingEmbed';
 export { GoogleVidEmbed } from './GoogleVidEmbed';
 export { PdfEmbed } from './PdfEmbed';
 export { GenericDriveEmbed } from './GenericDriveEmbed';
+export * from './LucidchartEmbed';
+export * from './MiroEmbed';
+export * from './DrawIoEmbed';

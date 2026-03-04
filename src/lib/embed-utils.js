@@ -21,6 +21,57 @@ export const parseEmbedUrl = (rawUrl) => {
   let typeName = 'File';
   let embedUrl = null;
   
+  // Miro
+  const miroMatch = url.match(/miro\.com\/app\/(?:board|live-embed)\/([a-zA-Z0-9-_=]+)/);
+  if (miroMatch) {
+    const boardId = miroMatch[1];
+    return {
+      type: 'miro',
+      fileId: boardId,
+      embedUrl: `https://miro.com/app/live-embed/${boardId}/?autoplay=true`,
+      icon: '🎯',
+      typeName: 'Miro',
+      isGoogleService: false,
+      originalUrl: url
+    };
+  }
+
+  // Draw.io / Diagrams.net
+  if (url.includes('app.diagrams.net') || url.includes('draw.io')) {
+    return {
+      type: 'drawio',
+      fileId: null,
+      embedUrl: url,
+      icon: '📐',
+      typeName: 'Draw.io',
+      isGoogleService: false,
+      originalUrl: url
+    };
+  }
+
+  // Lucidchart
+  if (url.includes('lucid.app/documents')) {
+    let finalUrl = url.trim();
+    const srcMatch = finalUrl.match(/src=["'](.*?)["']/);
+    if (srcMatch) finalUrl = srcMatch[1];
+    const uuidMatch = finalUrl.match(/lucidchart\/([a-f0-9-]+)/);
+    if (uuidMatch) {
+      finalUrl = `https://lucid.app/documents/embedded/${uuidMatch[1]}`;
+    } else {
+      finalUrl = finalUrl.replace('/documents/view/', '/documents/embedded/');
+      finalUrl = finalUrl.replace('/documents/edit/', '/documents/embedded/');
+    }
+    return {
+      type: 'lucidchart',
+      fileId: null,
+      embedUrl: finalUrl,
+      icon: '📊',
+      typeName: 'Lucidchart',
+      isGoogleService: false,
+      originalUrl: url
+    };
+  }
+
   // PDF: direct .pdf link
   if (/\.pdf(\?|#|$)/i.test(url)) {
     embedUrl = `https://drive.google.com/viewerng/viewer?embedded=true&url=${encodeURIComponent(url)}`;
@@ -267,7 +318,10 @@ export const getTypeDisplayName = (type) => {
     script: 'Apps Script',
     vid: 'Google Vids',
     pdf: 'PDF',
-    drive: 'Drive File'
+    drive: 'Drive File',
+    miro: 'Miro Board',
+    drawio: 'Draw.io Diagram',
+    lucidchart: 'Lucidchart',
   };
   return names[type] || 'Embed';
 };

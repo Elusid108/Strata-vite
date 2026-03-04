@@ -109,7 +109,12 @@ export function useAppActions() {
 
       const page = data.notebooks.flatMap((nb) => nb.tabs.flatMap((t) => t.pages)).find((p) => p.id === pageId);
       if (page?.embedUrl) {
-        setViewedEmbedPages((prev) => new Set([...prev, pageId]));
+        setViewedEmbedPages((prev) => {
+          const next = new Set(prev);
+          next.delete(pageId);
+          next.add(pageId);
+          return next;
+        });
       }
 
       setData((prev) => ({
@@ -304,12 +309,17 @@ export function useAppActions() {
       };
       setData(newData);
       setActivePageId(newPage.id);
+      setViewedEmbedPages(prev => {
+        const next = new Set(prev);
+        next.add(newPage.id);
+        return next;
+      });
       showNotification(`${pageName} added`, 'success');
       triggerStructureSync();
       triggerContentSync(newPage.id);
       return true;
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
+    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId, setViewedEmbedPages]
   );
 
   const addGooglePage = useCallback(
@@ -394,11 +404,16 @@ export function useAppActions() {
       };
       setData(newData);
       setActivePageId(newPage.id);
+      setViewedEmbedPages(prev => {
+        const next = new Set(prev);
+        next.add(newPage.id);
+        return next;
+      });
       showNotification(`${file.name || 'Google ' + typeName} added`, 'success');
       triggerStructureSync();
       triggerContentSync(newPage.id);
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
+    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId, setViewedEmbedPages]
   );
 
   const executeDelete = useCallback(

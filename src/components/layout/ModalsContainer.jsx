@@ -449,6 +449,32 @@ export function ModalsContainer() {
               <p className="text-xs text-gray-400 mt-1">Controls how many columns you can create when dragging blocks side-by-side</p>
             </div>
 
+            <div className="mb-6">
+              <label className="flex items-center justify-between text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 cursor-pointer">
+                <span>Limit Background Pages</span>
+                <input
+                  type="checkbox"
+                  checked={settings.limitBackgroundPages || false}
+                  onChange={(e) => setSettings(s => ({ ...s, limitBackgroundPages: e.target.checked }))}
+                  className="accent-blue-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+              {settings.limitBackgroundPages && (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={settings.maxBackgroundPages || 10}
+                    onChange={(e) => setSettings(s => ({ ...s, maxBackgroundPages: parseInt(e.target.value) }))}
+                    className="flex-1 accent-blue-500 cursor-pointer"
+                  />
+                  <span className="w-8 text-center font-bold text-lg dark:text-white">{settings.maxBackgroundPages || 10}</span>
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mt-1">Improves performance by unmounting older embed pages (Google Drive, Miro, etc.).</p>
+            </div>
+
             <div className="border-t dark:border-gray-700 pt-4">
               <button
                 onClick={() => setShowSettings(false)}

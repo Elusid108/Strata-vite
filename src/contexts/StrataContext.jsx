@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useGoogleDrive } from '../hooks/useGoogleDrive';
 import { useHistory } from '../hooks/useHistory';
@@ -94,6 +94,16 @@ export function StrataProvider({ children }) {
   const titleInputRef = useRef(null);
   const shouldFocusPageRef = useRef(false);
   const dragHoverTimerRef = useRef(null);
+
+  // Enforce background page limit (LRU Trim)
+  useEffect(() => {
+    if (settings.limitBackgroundPages && viewedEmbedPages.size > (settings.maxBackgroundPages || 10)) {
+      setViewedEmbedPages(prev => {
+        const arr = Array.from(prev);
+        return new Set(arr.slice(-(settings.maxBackgroundPages || 10)));
+      });
+    }
+  }, [settings.limitBackgroundPages, settings.maxBackgroundPages, viewedEmbedPages.size]);
 
   const value = {
     // Data & persistence

@@ -3,10 +3,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { MERMAID_MIN_SCALE, MERMAID_MAX_SCALE, MERMAID_ZOOM_STEP, PYODIDE_URL } from '../../lib/constants';
-import { Star, Edit3, X, ZoomIn, ZoomOut, Maximize2 } from '../icons';
+import { Star, ZoomIn, ZoomOut, Maximize2, Download } from '../icons';
 
 // Helper functions
-const getCode = (p) => (p.code ?? p.mermaidCode ?? p.codeContent ?? '').trim();
 const getCodeType = (p) => p.codeType || 'mermaid';
 
 const getSandboxedTemplate = (userCode, type) => {
@@ -96,10 +95,11 @@ const MermaidPageComponent = ({
   activeTabId 
 }) => {
   const codeType = getCodeType(page);
-  const code = getCode(page);
-  const [showCodeEdit, setShowCodeEdit] = useState(false);
-  const [codeEditValue, setCodeEditValue] = useState('');
-  const [codeEditType, setCodeEditType] = useState('mermaid');
+  const [localCode, setLocalCode] = useState(page.code ?? page.mermaidCode ?? page.codeContent ?? '');
+  const [renderedCode, setRenderedCode] = useState(page.code ?? page.mermaidCode ?? page.codeContent ?? '');
+  const [iframeKey, setIframeKey] = useState(0);
+  const [viewMode, setViewMode] = useState('split');
+  const [svgContent, setSvgContent] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [mermaidError, setMermaidError] = useState(null);
   const [currentTheme, setCurrentTheme] = useState(() => document.documentElement.classList.contains('dark') ? 'dark' : 'light');
@@ -108,7 +108,8 @@ const MermaidPageComponent = ({
   const [pythonError, setPythonError] = useState(null);
   const [pythonLoading, setPythonLoading] = useState(false);
   const [pythonRunning, setPythonRunning] = useState(false);
-  const diagramContainerRef = useRef(null);
+  const svgContainerRef = useRef(null);
+  const mermaidBindFunctionsRef = useRef(null);
   const mermaidInitRef = useRef(null); // Store current theme instead of boolean
   const viewportRef = useRef(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
@@ -118,6 +119,20 @@ const MermaidPageComponent = ({
   const savedViewport = page.mermaidViewport || { x: 0, y: 0, scale: 1 };
   const [transform, setTransform] = useState(savedViewport);
   const [dragInfo, setDragInfo] = useState(null);
+  const [showLanguageMenu, setShowLanguageMenu] = useState(false);
+  const languageMenuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (languageMenuRef.current && !languageMenuRef.current.contains(e.target)) {
+        setShowLanguageMenu(false);
+      }
+    };
+    if (showLanguageMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showLanguageMenu]);
 
   useEffect(() => {
     transformRef.current = transform;
@@ -137,7 +152,7 @@ const MermaidPageComponent = ({
     }, 300);
   }, [transform, onUpdate]);
 
-  const isMermaidWithContent = codeType === 'mermaid' && code.length > 0;
+  const isMermaidWithContent = codeType === 'mermaid' && renderedCode.trim().length > 0;
   useEffect(() => {
     if (!isMermaidWithContent || mermaidError) return;
     persistViewport();
@@ -146,32 +161,47 @@ const MermaidPageComponent = ({
 
   const hasDiagram = isMermaidWithContent && !mermaidError;
 
-  const openCodeEdit = () => {
-    setCodeEditValue(page.code ?? page.mermaidCode ?? page.codeContent ?? '');
-    setCodeEditType(getCodeType(page));
-    setShowCodeEdit(true);
-    setIframeError(null);
-    setPythonError(null);
+  // Reset local state when switching to a different page
+  useEffect(() => {
+    const pageCode = page.code ?? page.mermaidCode ?? page.codeContent ?? '';
+    setLocalCode(pageCode);
+    setRenderedCode(pageCode);
+    setIframeKey((k) => k + 1);
+  }, [page.id]);
+
+  const saveCodeToApp = (codeToSave) => {
+    const currentCode = page.code ?? page.mermaidCode ?? page.codeContent ?? '';
+    if (codeToSave !== currentCode) {
+      const payload = { code: codeToSave };
+      if (codeType === 'mermaid') payload.mermaidCode = codeToSave;
+      onUpdate(payload);
+    }
   };
 
-  const handleSaveCode = () => {
+  const handleRun = () => {
+    setIframeError(null);
+    setRenderedCode(localCode);
+    setIframeKey((k) => k + 1);
+    saveCodeToApp(localCode);
     if (saveToHistory) saveToHistory();
-    const payload = { codeType: codeEditType, code: codeEditValue };
-    if (codeEditType === 'mermaid') payload.mermaidCode = codeEditValue;
+    if (showNotification) showNotification('Code saved & updated', 'success');
+  };
+
+  const handleCodeTypeChange = (newType) => {
+    const payload = { codeType: newType, code: localCode };
+    if (newType === 'mermaid') payload.mermaidCode = localCode;
     onUpdate(payload);
-    setShowCodeEdit(false);
-    if (showNotification) showNotification('Code updated', 'success');
   };
 
   const clampScale = (s) => Math.min(MERMAID_MAX_SCALE, Math.max(MERMAID_MIN_SCALE, s));
 
   const calculateZoomToFit = () => {
-    if (!diagramContainerRef.current || !viewportRef.current) {
+    if (!svgContainerRef.current || !viewportRef.current) {
       return { x: 0, y: 0, scale: 1 };
     }
 
-    // Find the SVG element inside the diagram container
-    const svg = diagramContainerRef.current.querySelector('svg');
+    // Find the SVG element inside the container
+    const svg = svgContainerRef.current.querySelector('svg');
     if (!svg) {
       return { x: 0, y: 0, scale: 1 };
     }
@@ -234,6 +264,20 @@ const MermaidPageComponent = ({
     setTransform(fitTransform);
   };
 
+  const handleZoomIn = () => handleMermaidZoom(MERMAID_ZOOM_STEP);
+  const handleZoomOut = () => handleMermaidZoom(-MERMAID_ZOOM_STEP);
+
+  const downloadSvg = () => {
+    if (!svgContent) return;
+    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${page.name || 'diagram'}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleMermaidWheel = useCallback((e) => {
     const t = transformRef.current;
     const rect = viewportRef.current ? viewportRef.current.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
@@ -284,10 +328,11 @@ const MermaidPageComponent = ({
     }
   };
 
-  // Mermaid rendering effect
+  // Mermaid rendering effect - uses mermaid.render() to get SVG string
   useEffect(() => {
-    if (codeType !== 'mermaid' || !code || !diagramContainerRef.current) {
+    if (codeType !== 'mermaid' || !renderedCode.trim()) {
       setMermaidError(null);
+      setSvgContent('');
       hasAppliedInitialFitRef.current = false;
       return;
     }
@@ -297,23 +342,13 @@ const MermaidPageComponent = ({
       return;
     }
     
-    // Increment render ID to cancel any in-progress renders
     renderIdRef.current += 1;
     const currentRenderId = renderIdRef.current;
-    
-    // Reset the fit flag when chart code changes
     hasAppliedInitialFitRef.current = false;
-    const el = diagramContainerRef.current;
-    el.innerHTML = '';
-    const pre = document.createElement('pre');
-    pre.className = 'mermaid';
-    pre.textContent = code;
-    el.appendChild(pre);
-    // Detect dark mode and use appropriate theme
+    
     const isDarkMode = document.documentElement.classList.contains('dark');
     const mermaidTheme = isDarkMode ? 'dark' : 'default';
     
-    // Reinitialize if theme changed or not initialized yet
     if (!mermaidInitRef.current || mermaidInitRef.current !== mermaidTheme) {
       try {
         window.mermaid.initialize({ startOnLoad: false, theme: mermaidTheme });
@@ -325,53 +360,38 @@ const MermaidPageComponent = ({
     }
     setMermaidError(null);
     
-    window.mermaid.run({ nodes: [pre] }).then(() => {
-      // Check if this render is still current (not superseded by another render)
-      if (currentRenderId !== renderIdRef.current) return;
-      
-      // Wait for SVG to be rendered in the DOM
-      const waitForSvg = () => {
-        // Check if still current render
+    const uniqueId = `mermaid-${page.id}-${currentRenderId}`;
+    window.mermaid.render(uniqueId, renderedCode.trim())
+      .then(({ svg, bindFunctions }) => {
         if (currentRenderId !== renderIdRef.current) return;
-        
-        const svg = el.querySelector('svg');
-        if (svg && !hasAppliedInitialFitRef.current) {
-          // Set SVG dimensions based on viewBox to ensure proper sizing
-          const viewBox = svg.getAttribute('viewBox');
-          if (viewBox) {
-            const parts = viewBox.split(/\s+/);
-            const vbWidth = parseFloat(parts[2]);
-            const vbHeight = parseFloat(parts[3]);
-            if (vbWidth > 0 && vbHeight > 0) {
-              svg.setAttribute('width', vbWidth);
-              svg.setAttribute('height', vbHeight);
-            }
+        mermaidBindFunctionsRef.current = bindFunctions;
+        setSvgContent(svg);
+        requestAnimationFrame(() => {
+          if (currentRenderId !== renderIdRef.current) return;
+          if (!hasAppliedInitialFitRef.current && svgContainerRef.current && viewportRef.current) {
+            const fitTransform = calculateZoomToFit();
+            setTransform(fitTransform);
+            hasAppliedInitialFitRef.current = true;
           }
-          
-          // Use requestAnimationFrame to ensure layout is complete
-          requestAnimationFrame(() => {
-            // Final check if still current render
-            if (currentRenderId !== renderIdRef.current) return;
-            
-            if (!hasAppliedInitialFitRef.current && diagramContainerRef.current && viewportRef.current) {
-              const fitTransform = calculateZoomToFit();
-              setTransform(fitTransform);
-              hasAppliedInitialFitRef.current = true;
-            }
-          });
-        } else if (!svg) {
-          // SVG not ready yet, try again
-          setTimeout(waitForSvg, 50);
-        }
-      };
-      waitForSvg();
-    }).catch(() => {
-      // Only set error if this is still the current render
-      if (currentRenderId !== renderIdRef.current) return;
-      setMermaidError('Invalid Mermaid syntax');
-      hasAppliedInitialFitRef.current = false;
-    });
-  }, [page.id, codeType, code]);
+        });
+      })
+      .catch(() => {
+        if (currentRenderId !== renderIdRef.current) return;
+        setMermaidError('Invalid Mermaid syntax');
+        setSvgContent('');
+        hasAppliedInitialFitRef.current = false;
+      });
+  }, [page.id, codeType, renderedCode]);
+
+  // Call mermaid bindFunctions after SVG is in DOM
+  useEffect(() => {
+    if (svgContent && mermaidBindFunctionsRef.current && svgContainerRef.current) {
+      try {
+        mermaidBindFunctionsRef.current(svgContainerRef.current);
+      } catch (_) {}
+      mermaidBindFunctionsRef.current = null;
+    }
+  }, [svgContent]);
 
   // Watch for theme changes
   useEffect(() => {
@@ -388,38 +408,31 @@ const MermaidPageComponent = ({
 
   // Re-render diagram when theme changes
   useEffect(() => {
-    if (codeType !== 'mermaid' || !code || !diagramContainerRef.current) return;
+    if (codeType !== 'mermaid' || !renderedCode.trim()) return;
     
     const isDarkMode = currentTheme === 'dark';
     const mermaidTheme = isDarkMode ? 'dark' : 'default';
     
-    // Only reinitialize if theme changed
     if (mermaidInitRef.current !== mermaidTheme) {
-      const el = diagramContainerRef.current;
-      const svg = el.querySelector('svg');
-      if (svg && code) {
-        try {
-          window.mermaid.initialize({ startOnLoad: false, theme: mermaidTheme });
-          mermaidInitRef.current = mermaidTheme;
-          // Clear and re-render the diagram with new theme
-          el.innerHTML = '';
-          const pre = document.createElement('pre');
-          pre.className = 'mermaid';
-          pre.textContent = code;
-          el.appendChild(pre);
-          window.mermaid.run({ nodes: [pre] }).catch(() => {
-            setMermaidError('Invalid Mermaid syntax');
-          });
-        } catch (e) {
-          setMermaidError('Failed to reinitialize Mermaid');
-        }
+      try {
+        window.mermaid.initialize({ startOnLoad: false, theme: mermaidTheme });
+        mermaidInitRef.current = mermaidTheme;
+        const uniqueId = `mermaid-theme-${page.id}-${Date.now()}`;
+        window.mermaid.render(uniqueId, renderedCode.trim())
+          .then(({ svg, bindFunctions }) => {
+            mermaidBindFunctionsRef.current = bindFunctions;
+            setSvgContent(svg);
+          })
+          .catch(() => setMermaidError('Invalid Mermaid syntax'));
+      } catch (e) {
+        setMermaidError('Failed to reinitialize Mermaid');
       }
     }
-  }, [codeType, code, currentTheme]);
+  }, [codeType, renderedCode, currentTheme, page.id]);
 
   // Python execution effect
   useEffect(() => {
-    if (codeType !== 'python' || !code) {
+    if (codeType !== 'python' || !renderedCode.trim()) {
       setPythonOutput('');
       setPythonError(null);
       setPythonLoading(false);
@@ -438,7 +451,7 @@ const MermaidPageComponent = ({
         if (cancelled) return;
         setPythonLoading(false);
         setPythonRunning(true);
-        const { output, error } = await runPythonCode(code, pyodide);
+        const { output, error } = await runPythonCode(renderedCode, pyodide);
         if (cancelled) return;
         setPythonOutput(output);
         setPythonError(error);
@@ -452,9 +465,9 @@ const MermaidPageComponent = ({
       }
     })();
     return () => { cancelled = true; };
-  }, [page.id, codeType, code]);
+  }, [page.id, codeType, renderedCode]);
 
-  const codePlaceholder = codeEditType === 'mermaid' ? 'Paste or type Mermaid code... e.g. graph TD; A --> B;' : codeEditType === 'javascript' ? 'Paste or type JavaScript... e.g. document.body.innerHTML = \'<p>Hello</p>\';' : codeEditType === 'python' ? 'Paste or type Python... e.g. print(\'Hello\'); 1 + 2' : 'Paste or type HTML... e.g. <h1>Hi</h1> or full mini-app.';
+  const codePlaceholder = codeType === 'mermaid' ? 'Paste or type Mermaid code... e.g. graph TD; A --> B;' : codeType === 'javascript' ? 'Paste or type JavaScript... e.g. document.body.innerHTML = \'<p>Hello</p>\';' : codeType === 'python' ? 'Paste or type Python... e.g. print(\'Hello\'); 1 + 2' : codeType === 'raw' ? 'Raw mode: paste any text or code. Preview disabled.' : 'Paste or type HTML... e.g. <h1>Hi</h1> or full mini-app.';
 
   // Handle name update - fallback if updateLocalName not provided
   const handleNameChange = (e) => {
@@ -510,13 +523,37 @@ const MermaidPageComponent = ({
         >
           <Star size={16} filled={page.starred} />
         </button>
-        <button
-          onClick={openCodeEdit}
-          className="p-1.5 rounded transition-colors text-gray-500 dark:text-gray-400 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-700"
-          title="Edit code"
-        >
-          <Edit3 size={16} />
-        </button>
+        <div className="relative" ref={languageMenuRef}>
+          <button
+            onClick={() => setShowLanguageMenu(!showLanguageMenu)}
+            className="text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors border border-gray-200 dark:border-gray-600"
+          >
+            {codeType === 'raw' ? 'Raw Code' : codeType === 'javascript' ? 'JavaScript' : codeType === 'python' ? 'Python' : codeType === 'html' ? 'HTML' : 'Mermaid'}
+            <svg className={`w-3 h-3 transition-transform ${showLanguageMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+
+          {showLanguageMenu && (
+            <div className="absolute right-0 mt-2 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden py-1">
+              {['raw', 'javascript', 'python', 'html', 'mermaid'].map((lang) => (
+                <button
+                  key={lang}
+                  onClick={() => {
+                    handleCodeTypeChange(lang);
+                    setShowLanguageMenu(false);
+                  }}
+                  className={`w-full text-left px-4 py-2 text-sm transition-colors ${codeType === lang ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                >
+                  {lang === 'raw' ? 'Raw Code' : lang === 'javascript' ? 'JavaScript' : lang === 'python' ? 'Python' : lang === 'html' ? 'HTML' : 'Mermaid'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mr-2">
+          <button onClick={() => setViewMode('code')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'code' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Code</button>
+          <button onClick={() => setViewMode('split')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'split' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Split</button>
+          <button onClick={() => setViewMode('preview')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'preview' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Preview</button>
+        </div>
         {hasDiagram && (
           <div className="flex items-center gap-1 ml-2 border-l border-gray-200 dark:border-gray-600 pl-2" title="Zoom and pan supported. Moving individual nodes is not supported; use the Mermaid source or spacing options to reduce overlap.">
             <button
@@ -547,127 +584,119 @@ const MermaidPageComponent = ({
             </button>
           </div>
         )}
-        <span className="ml-auto text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 rounded px-2 py-0.5">
-          {codeType === 'mermaid' ? 'Mermaid' : codeType === 'javascript' ? 'JavaScript' : codeType === 'python' ? 'Python' : 'HTML'}
-        </span>
       </div>
-      {!code ? (
-        <div className="flex-1 min-h-0 overflow-auto flex flex-col items-center justify-center text-gray-500 dark:text-gray-400 p-6">
-          <p className="text-sm mb-4">No code yet. Click the pencil to add code.</p>
-          <button
-            onClick={openCodeEdit}
-            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Add code
-          </button>
-        </div>
-      ) : codeType === 'mermaid' ? (
-        mermaidError ? (
-          <div className="flex-1 min-h-0 overflow-auto p-6">
-            <div className="text-sm text-red-600 dark:text-red-400">{mermaidError}</div>
+      <div className={`flex-1 flex ${viewMode === 'split' ? 'flex-row' : 'flex-col'} relative overflow-hidden`}>
+        {/* EDITOR PANE */}
+        {(viewMode === 'code' || viewMode === 'split') && (
+          <div className={`flex-1 flex flex-col bg-gray-50 dark:bg-gray-900 relative min-h-0 ${viewMode === 'split' ? 'w-1/2 border-r border-gray-200 dark:border-gray-700' : 'w-full'}`}>
+            <textarea
+              value={localCode}
+              onChange={(e) => setLocalCode(e.target.value)}
+              onBlur={() => saveCodeToApp(localCode)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                  e.preventDefault();
+                  handleRun();
+                }
+              }}
+              placeholder={codePlaceholder}
+              className="flex-1 w-full p-4 bg-transparent resize-none outline-none font-mono text-sm text-gray-800 dark:text-gray-200 whitespace-pre scrollbar-thin pb-16"
+              spellCheck="false"
+            />
+            <button
+              onClick={handleRun}
+              className="absolute bottom-4 right-4 px-4 py-2 bg-blue-500 text-white font-medium text-sm rounded-lg shadow-lg hover:bg-blue-600 transition-colors z-20 flex items-center gap-2"
+            >
+              ▶ Save & Run
+            </button>
           </div>
-        ) : (
+        )}
+
+        {/* PREVIEW PANE */}
+        {(viewMode === 'preview' || viewMode === 'split') && (
           <div
             ref={viewportRef}
-            className="flex-1 min-h-0 overflow-hidden relative select-none"
-            style={{ touchAction: 'none', cursor: dragInfo ? 'grabbing' : 'grab' }}
-            onPointerDown={handleMermaidPointerDown}
-            onPointerMove={handleMermaidPointerMove}
-            onPointerUp={handleMermaidPointerUp}
-            onPointerLeave={handleMermaidPointerUp}
-            onPointerCancel={handleMermaidPointerUp}
+            className={`flex-1 flex flex-col bg-white dark:bg-gray-800 relative overflow-hidden min-h-0 ${viewMode === 'split' ? 'w-1/2' : 'w-full'}`}
+            {...(codeType === 'mermaid' ? {
+              style: { touchAction: 'none', cursor: dragInfo ? 'grabbing' : 'grab' },
+              onPointerDown: handleMermaidPointerDown,
+              onPointerMove: handleMermaidPointerMove,
+              onPointerUp: handleMermaidPointerUp,
+              onPointerLeave: handleMermaidPointerUp,
+              onPointerCancel: handleMermaidPointerUp
+            } : {})}
           >
-            <div
-              className="absolute top-0 left-0 w-fit h-fit"
-              style={{
-                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-                transformOrigin: '0 0'
-              }}
-            >
-              <div ref={diagramContainerRef} className="mermaid-container flex justify-center items-start" />
-            </div>
-          </div>
-        )
-      ) : (codeType === 'html' || codeType === 'javascript') ? (
-        iframeError ? (
-          <div className="flex-1 min-h-0 overflow-auto p-6">
-            <div className="text-sm text-red-600 dark:text-red-400">{iframeError}</div>
-          </div>
-        ) : (
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <iframe
-              title="Code output"
-              sandbox="allow-scripts"
-              srcDoc={getSandboxedTemplate(code, codeType)}
-              className="flex-1 min-h-0 w-full border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900"
-              onError={() => setIframeError('Failed to load or run code.')}
-            />
-          </div>
-        )
-      ) : codeType === 'python' ? (
-        pythonError ? (
-          <div className="flex-1 min-h-0 overflow-auto p-6">
-            <div className="text-sm text-red-600 dark:text-red-400 whitespace-pre-wrap font-mono">{pythonError}</div>
-          </div>
-        ) : (
-          <div className="flex-1 min-h-0 flex flex-col p-4 overflow-hidden">
-            {pythonLoading ? (
-              <div className="flex-1 min-h-0 flex items-center justify-center text-gray-500 dark:text-gray-400">
-                {pythonRunning ? 'Running...' : 'Loading Pyodide...'}
+            {codeType === 'raw' ? (
+              <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500 font-mono text-sm">
+                Raw mode: Preview disabled
+              </div>
+            ) : !renderedCode.trim() ? (
+              <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-500 font-mono text-sm">
+                Enter code and click Save & Run
+              </div>
+            ) : codeType === 'mermaid' ? (
+              <>
+                {mermaidError ? (
+                  <div className="flex-1 flex items-center justify-center p-6">
+                    <div className="text-sm text-red-600 dark:text-red-400">{mermaidError}</div>
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      ref={svgContainerRef}
+                      className="absolute top-0 left-0 w-fit h-fit cursor-grab active:cursor-grabbing"
+                      style={{
+                        transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+                        transformOrigin: '0 0',
+                      }}
+                      dangerouslySetInnerHTML={{ __html: svgContent }}
+                    />
+                    {svgContent && (
+                      <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
+                        <button onClick={handleZoomIn} className="p-2 bg-white dark:bg-gray-700 rounded shadow hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200" title="Zoom in"><ZoomIn size={16} /></button>
+                        <button onClick={handleZoomOut} className="p-2 bg-white dark:bg-gray-700 rounded shadow hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200" title="Zoom out"><ZoomOut size={16} /></button>
+                        <button onClick={handleMermaidFit} className="p-2 bg-white dark:bg-gray-700 rounded shadow hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200" title="Fit to view"><Maximize2 size={16} /></button>
+                        <button onClick={downloadSvg} className="p-2 bg-white dark:bg-gray-700 rounded shadow hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200" title="Download SVG"><Download size={16} /></button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            ) : codeType === 'python' ? (
+              pythonError ? (
+                <div className="flex-1 min-h-0 overflow-auto p-6">
+                  <div className="text-sm text-red-600 dark:text-red-400 whitespace-pre-wrap font-mono">{pythonError}</div>
+                </div>
+              ) : (
+                <div className="flex-1 min-h-0 flex flex-col p-4 overflow-hidden">
+                  {pythonLoading ? (
+                    <div className="flex-1 min-h-0 flex items-center justify-center text-gray-500 dark:text-gray-400">
+                      {pythonRunning ? 'Running...' : 'Loading Pyodide...'}
+                    </div>
+                  ) : (
+                    <pre className="flex-1 min-h-0 w-full overflow-auto p-4 text-sm font-mono whitespace-pre-wrap border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+                      {pythonOutput || '\u00a0'}
+                    </pre>
+                  )}
+                </div>
+              )
+            ) : iframeError ? (
+              <div className="flex-1 flex items-center justify-center p-6">
+                <div className="text-sm text-red-600 dark:text-red-400">{iframeError}</div>
               </div>
             ) : (
-              <pre className="flex-1 min-h-0 w-full overflow-auto p-4 text-sm font-mono whitespace-pre-wrap border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200">
-                {pythonOutput || '\u00a0'}
-              </pre>
+              <iframe
+                key={iframeKey}
+                sandbox="allow-scripts allow-same-origin"
+                srcDoc={getSandboxedTemplate(renderedCode, codeType)}
+                className="w-full h-full border-none bg-white"
+                title="Code Output"
+                onError={() => setIframeError('Failed to load or run code.')}
+              />
             )}
           </div>
-        )
-      ) : null}
-      {showCodeEdit && (
-        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full p-6 animate-fade-in">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-xl flex items-center gap-3 dark:text-white">
-                <Edit3 size={20} /> Edit code
-              </h3>
-              <button onClick={() => setShowCodeEdit(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                <X size={20} className="dark:text-white" />
-              </button>
-            </div>
-            <div className="flex gap-2 mb-3">
-              {['mermaid', 'javascript', 'html', 'python'].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setCodeEditType(t)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${codeEditType === t ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
-                >
-                  {t === 'mermaid' ? 'Mermaid' : t === 'javascript' ? 'JavaScript' : t === 'python' ? 'Python' : 'HTML'}
-                </button>
-              ))}
-            </div>
-            <textarea
-              className="w-full h-64 p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white font-mono text-sm resize-y"
-              placeholder={codePlaceholder}
-              value={codeEditValue}
-              onChange={(e) => setCodeEditValue(e.target.value)}
-            />
-            <div className="flex justify-end gap-3 mt-4">
-              <button
-                onClick={() => setShowCodeEdit(false)}
-                className="px-5 py-2 font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveCode}
-                className="px-5 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

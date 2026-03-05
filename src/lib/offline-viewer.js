@@ -222,6 +222,8 @@ export const generateOfflineViewerHtml = () => {
                         html += '<iframe title="Code output" sandbox="allow-scripts" srcdoc="' + wrapped.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '" style="width:100%;min-height:400px;border:1px solid #e5e7eb;border-radius:8px;"></iframe>';
                     } else if (codeType === 'python') {
                         html += '<div id="pyodide-output" class="pyodide-output" style="white-space:pre-wrap;font-family:monospace;font-size:14px;padding:16px;border:1px solid #e5e7eb;border-radius:8px;min-height:200px;">Loading Pyodide...</div>';
+                    } else if (codeType === 'raw') {
+                        html += '<pre style="white-space:pre-wrap;font-family:monospace;font-size:14px;padding:16px;border:1px solid #e5e7eb;border-radius:8px;min-height:200px;">' + code.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
                     } else {
                         html += '<div class="empty">Unsupported code type.</div>';
                     }

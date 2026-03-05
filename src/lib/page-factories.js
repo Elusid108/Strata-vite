@@ -55,7 +55,9 @@ export const createCodePage = (name = 'Code Page') => {
     createdAt: Date.now(),
     type: 'mermaid',
     icon: '</>',
-    codeType: 'mermaid',
+    codeType: 'raw',
+    language: 'raw',
+    viewMode: 'code',
     code: '',
     mermaidCode: '',
     mermaidViewport: { x: 0, y: 0, scale: 1 }

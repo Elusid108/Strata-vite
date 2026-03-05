@@ -2,6 +2,11 @@
 // Extracted from Strata index.html Section F
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { html } from '@codemirror/lang-html';
+import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import { MERMAID_MIN_SCALE, MERMAID_MAX_SCALE, MERMAID_ZOOM_STEP, PYODIDE_URL } from '../../lib/constants';
 import { Star, ZoomIn, ZoomOut, Maximize2, Download } from '../icons';
 
@@ -98,7 +103,8 @@ const MermaidPageComponent = ({
   const [localCode, setLocalCode] = useState(page.code ?? page.mermaidCode ?? page.codeContent ?? '');
   const [renderedCode, setRenderedCode] = useState(page.code ?? page.mermaidCode ?? page.codeContent ?? '');
   const [iframeKey, setIframeKey] = useState(0);
-  const [viewMode, setViewMode] = useState('split');
+  const [viewMode, setViewMode] = useState(page.viewMode || 'split');
+  const [splitRatio, setSplitRatio] = useState(page.splitRatio || 50);
   const [svgContent, setSvgContent] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [mermaidError, setMermaidError] = useState(null);
@@ -121,6 +127,18 @@ const MermaidPageComponent = ({
   const [dragInfo, setDragInfo] = useState(null);
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const languageMenuRef = useRef(null);
+  const splitContainerRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const getLanguageExtensions = () => {
+    switch (codeType) {
+      case 'javascript': return [javascript({ jsx: true })];
+      case 'python': return [python()];
+      case 'html': return [html()];
+      default: return []; // raw and mermaid use plain text
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -167,7 +185,55 @@ const MermaidPageComponent = ({
     setLocalCode(pageCode);
     setRenderedCode(pageCode);
     setIframeKey((k) => k + 1);
+    setViewMode(page.viewMode || 'split');
+    setSplitRatio(page.splitRatio || 50);
   }, [page.id]);
+
+  const handleViewModeChange = (mode) => {
+    setViewMode(mode);
+    onUpdate({ viewMode: mode });
+  };
+
+  const handleDragStart = (e) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    setIsDragging(true);
+    document.body.style.cursor = 'col-resize';
+  };
+
+  const resetSplit = () => {
+    setSplitRatio(50);
+    onUpdate({ splitRatio: 50 });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDraggingRef.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      let newRatio = ((e.clientX - rect.left) / rect.width) * 100;
+      newRatio = Math.max(10, Math.min(90, newRatio));
+      setSplitRatio(newRatio);
+    };
+
+    const handleMouseUp = () => {
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        document.body.style.cursor = 'default';
+        setSplitRatio((prev) => {
+          onUpdate({ splitRatio: prev });
+          return prev;
+        });
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [onUpdate]);
 
   const saveCodeToApp = (codeToSave) => {
     const currentCode = page.code ?? page.mermaidCode ?? page.codeContent ?? '';
@@ -467,8 +533,6 @@ const MermaidPageComponent = ({
     return () => { cancelled = true; };
   }, [page.id, codeType, renderedCode]);
 
-  const codePlaceholder = codeType === 'mermaid' ? 'Paste or type Mermaid code... e.g. graph TD; A --> B;' : codeType === 'javascript' ? 'Paste or type JavaScript... e.g. document.body.innerHTML = \'<p>Hello</p>\';' : codeType === 'python' ? 'Paste or type Python... e.g. print(\'Hello\'); 1 + 2' : codeType === 'raw' ? 'Raw mode: paste any text or code. Preview disabled.' : 'Paste or type HTML... e.g. <h1>Hi</h1> or full mini-app.';
-
   // Handle name update - fallback if updateLocalName not provided
   const handleNameChange = (e) => {
     if (updateLocalName) {
@@ -550,9 +614,9 @@ const MermaidPageComponent = ({
           )}
         </div>
         <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mr-2">
-          <button onClick={() => setViewMode('code')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'code' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Code</button>
-          <button onClick={() => setViewMode('split')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'split' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Split</button>
-          <button onClick={() => setViewMode('preview')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'preview' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Preview</button>
+          <button onClick={() => handleViewModeChange('code')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'code' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Code</button>
+          <button onClick={() => handleViewModeChange('split')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'split' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Split</button>
+          <button onClick={() => handleViewModeChange('preview')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'preview' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Preview</button>
         </div>
         {hasDiagram && (
           <div className="flex items-center gap-1 ml-2 border-l border-gray-200 dark:border-gray-600 pl-2" title="Zoom and pan supported. Moving individual nodes is not supported; use the Mermaid source or spacing options to reduce overlap.">
@@ -585,24 +649,39 @@ const MermaidPageComponent = ({
           </div>
         )}
       </div>
-      <div className={`flex-1 flex ${viewMode === 'split' ? 'flex-row' : 'flex-col'} relative overflow-hidden`}>
+      <div ref={splitContainerRef} className={`flex-1 flex ${viewMode === 'split' ? 'flex-row' : 'flex-col'} relative overflow-hidden`}>
+        {isDragging && (
+          <div className="fixed inset-0 z-[9999] cursor-col-resize" />
+        )}
         {/* EDITOR PANE */}
         {(viewMode === 'code' || viewMode === 'split') && (
-          <div className={`flex-1 flex flex-col bg-gray-50 dark:bg-gray-900 relative min-h-0 ${viewMode === 'split' ? 'w-1/2 border-r border-gray-200 dark:border-gray-700' : 'w-full'}`}>
-            <textarea
-              value={localCode}
-              onChange={(e) => setLocalCode(e.target.value)}
-              onBlur={() => saveCodeToApp(localCode)}
+          <div className={`flex-1 flex flex-col bg-gray-50 dark:bg-gray-900 relative min-h-0 ${viewMode === 'split' ? 'border-r border-gray-200 dark:border-gray-700' : ''}`} style={viewMode === 'split' ? { width: `${splitRatio}%` } : { width: '100%' }}>
+            <div
+              className="flex-1 w-full relative overflow-hidden flex flex-col"
               onKeyDown={(e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                   e.preventDefault();
                   handleRun();
                 }
               }}
-              placeholder={codePlaceholder}
-              className="flex-1 w-full p-4 bg-transparent resize-none outline-none font-mono text-sm text-gray-800 dark:text-gray-200 whitespace-pre scrollbar-thin pb-16"
-              spellCheck="false"
-            />
+            >
+              <CodeMirror
+                value={localCode}
+                height="100%"
+                className="flex-1 overflow-auto text-sm"
+                theme={currentTheme === 'dark' ? githubDark : githubLight}
+                extensions={getLanguageExtensions()}
+                onChange={(value) => setLocalCode(value)}
+                onBlur={() => saveCodeToApp(localCode)}
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  highlightActiveLine: true,
+                  bracketMatching: true,
+                  tabSize: 2,
+                }}
+              />
+            </div>
             <button
               onClick={handleRun}
               className="absolute bottom-4 right-4 px-4 py-2 bg-blue-500 text-white font-medium text-sm rounded-lg shadow-lg hover:bg-blue-600 transition-colors z-20 flex items-center gap-2"
@@ -612,18 +691,36 @@ const MermaidPageComponent = ({
           </div>
         )}
 
+        {viewMode === 'split' && (
+          <div
+            className="w-2 cursor-col-resize bg-gray-200 hover:bg-blue-400 dark:bg-gray-700 dark:hover:bg-blue-500 z-50 flex items-center justify-center transition-colors shrink-0 border-x border-gray-300 dark:border-gray-600"
+            onMouseDown={handleDragStart}
+            onDoubleClick={resetSplit}
+            title="Drag to resize, double-click to reset"
+          >
+            <div className="flex flex-col gap-1 pointer-events-none">
+              <div className="w-0.5 h-1 bg-gray-400 dark:bg-gray-500 rounded-full"></div>
+              <div className="w-0.5 h-1 bg-gray-400 dark:bg-gray-500 rounded-full"></div>
+              <div className="w-0.5 h-1 bg-gray-400 dark:bg-gray-500 rounded-full"></div>
+            </div>
+          </div>
+        )}
+
         {/* PREVIEW PANE */}
         {(viewMode === 'preview' || viewMode === 'split') && (
           <div
             ref={viewportRef}
-            className={`flex-1 flex flex-col bg-white dark:bg-gray-800 relative overflow-hidden min-h-0 ${viewMode === 'split' ? 'w-1/2' : 'w-full'}`}
+            className="flex-1 flex flex-col bg-white dark:bg-gray-800 relative overflow-hidden min-h-0"
+            style={{
+              width: viewMode === 'split' ? `${100 - splitRatio}%` : '100%',
+              ...(codeType === 'mermaid' ? { touchAction: 'none', cursor: dragInfo ? 'grabbing' : 'grab' } : {}),
+            }}
             {...(codeType === 'mermaid' ? {
-              style: { touchAction: 'none', cursor: dragInfo ? 'grabbing' : 'grab' },
               onPointerDown: handleMermaidPointerDown,
               onPointerMove: handleMermaidPointerMove,
               onPointerUp: handleMermaidPointerUp,
               onPointerLeave: handleMermaidPointerUp,
-              onPointerCancel: handleMermaidPointerUp
+              onPointerCancel: handleMermaidPointerUp,
             } : {})}
           >
             {codeType === 'raw' ? (

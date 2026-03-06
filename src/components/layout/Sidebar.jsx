@@ -193,8 +193,8 @@ export function Sidebar() {
                 className={`${settings.condensedView ? 'text-xl' : ''} cursor-pointer hover:opacity-80 notebook-icon-trigger`}
                 onClick={(e) => {
                   if (settings.condensedView) return;
+                  if (activeNotebookId !== notebook.id) return; // Let click bubble to parent select action
                   e.stopPropagation();
-                  if (activeNotebookId !== notebook.id) return;
                   const pos = getPickerPosition(e.clientY, e.clientX);
                   setNotebookIconPicker(notebookIconPicker?.id === notebook.id ? null : { id: notebook.id, top: pos.top, left: pos.left });
                 }}

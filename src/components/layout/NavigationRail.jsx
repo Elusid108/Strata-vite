@@ -65,8 +65,8 @@ export function NavigationRail({ children }) {
                   className="cursor-pointer hover:opacity-80 tab-icon-trigger"
                   onClick={(e) => {
                     if (settings.condensedView) return;
+                    if (activeTabId !== tab.id) return; // Let click bubble to parent select action
                     e.stopPropagation();
-                    if (activeTabId !== tab.id) return;
                     const pos = getPickerPosition(e.clientY, e.clientX);
                     setTabIconPicker(tabIconPicker?.id === tab.id ? null : { id: tab.id, top: pos.top, left: pos.left });
                   }}
@@ -214,8 +214,8 @@ export function NavigationRail({ children }) {
                     className={`${settings.condensedView ? 'text-xl' : 'mr-1 flex-shrink-0'} cursor-pointer hover:opacity-80 page-icon-trigger`}
                     onClick={(e) => {
                       if (settings.condensedView) return;
+                      if (activePageId !== page.id) return; // Let click bubble to parent select action
                       e.stopPropagation();
-                      if (activePageId !== page.id) return;
                       const pos = getPickerPosition(e.clientY, e.clientX);
                       setPageIconPicker(pageIconPicker?.pageId === page.id ? null : { pageId: page.id, top: pos.top, left: pos.left });
                     }}

@@ -262,67 +262,63 @@ const MermaidPageComponent = ({
   const clampScale = (s) => Math.min(MERMAID_MAX_SCALE, Math.max(MERMAID_MIN_SCALE, s));
 
   const calculateZoomToFit = () => {
-    if (!svgContainerRef.current || !viewportRef.current) {
-      return { x: 0, y: 0, scale: 1 };
-    }
-
-    // Find the SVG element inside the container
+    if (!svgContainerRef.current || !viewportRef.current) return { x: 0, y: 0, scale: 1 };
     const svg = svgContainerRef.current.querySelector('svg');
-    if (!svg) {
-      return { x: 0, y: 0, scale: 1 };
+    if (!svg) return { x: 0, y: 0, scale: 1 };
+
+    // We explicitly set these in the render phase now
+    let svgWidth = parseFloat(svg.getAttribute('width'));
+    let svgHeight = parseFloat(svg.getAttribute('height'));
+
+    // Fallbacks just in case
+    if (!svgWidth || !svgHeight) {
+      const viewBox = svg.getAttribute('viewBox');
+      if (viewBox) {
+        const parts = viewBox.split(/\s+/);
+        svgWidth = parseFloat(parts[2]);
+        svgHeight = parseFloat(parts[3]);
+      }
+    }
+    if (!svgWidth || !svgHeight) {
+      const bbox = svg.getBoundingClientRect();
+      svgWidth = bbox.width;
+      svgHeight = bbox.height;
     }
 
-    // Get SVG dimensions
-    let svgWidth, svgHeight;
-    const viewBox = svg.getAttribute('viewBox');
-    if (viewBox) {
-      const parts = viewBox.split(/\s+/);
-      svgWidth = parseFloat(parts[2]) || svg.clientWidth || 0;
-      svgHeight = parseFloat(parts[3]) || svg.clientHeight || 0;
-    } else {
-      svgWidth = svg.clientWidth || svg.getBBox?.()?.width || 0;
-      svgHeight = svg.clientHeight || svg.getBBox?.()?.height || 0;
-    }
-
-    // Get viewport dimensions
     const viewportRect = viewportRef.current.getBoundingClientRect();
     const viewportWidth = viewportRect.width || 0;
     const viewportHeight = viewportRect.height || 0;
 
-    // Handle edge cases
     if (svgWidth <= 0 || svgHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
       return { x: 0, y: 0, scale: 1 };
     }
 
-    // Calculate scale with 10% padding (0.9 factor)
+    // Use 0.9 for a clean 10% margin around the diagram
     const scaleX = (viewportWidth * 0.9) / svgWidth;
     const scaleY = (viewportHeight * 0.9) / svgHeight;
     const scale = clampScale(Math.min(scaleX, scaleY));
 
-    // Calculate centered position
-    const scaledWidth = svgWidth * scale;
-    const scaledHeight = svgHeight * scale;
-    const x = (viewportWidth - scaledWidth) / 2;
-    const y = (viewportHeight - scaledHeight) / 2;
+    const x = (viewportWidth - (svgWidth * scale)) / 2;
+    const y = (viewportHeight - (svgHeight * scale)) / 2;
 
     return { x, y, scale };
   };
 
   const handleMermaidZoom = (delta, towardCenter = true) => {
-    const rect = viewportRef.current ? viewportRef.current.getBoundingClientRect() : null;
-    const cx = rect ? rect.width / 2 : 0;
-    const cy = rect ? rect.height / 2 : 0;
-    const t = transformRef.current;
-    const newScale = clampScale(t.scale + delta);
-    if (!towardCenter || !rect) {
-      setTransform({ ...t, scale: newScale });
-      return;
-    }
-    const dx = (cx - t.x) / t.scale;
-    const dy = (cy - t.y) / t.scale;
-    const newX = cx - dx * newScale;
-    const newY = cy - dy * newScale;
-    setTransform({ x: newX, y: newY, scale: newScale });
+    setTransform(prev => {
+      const rect = viewportRef.current ? viewportRef.current.getBoundingClientRect() : null;
+      const cx = rect ? rect.width / 2 : 0;
+      const cy = rect ? rect.height / 2 : 0;
+      const newScale = clampScale(prev.scale + delta);
+      if (!towardCenter || !rect) {
+        return { ...prev, scale: newScale };
+      }
+      const dx = (cx - prev.x) / prev.scale;
+      const dy = (cy - prev.y) / prev.scale;
+      const newX = cx - dx * newScale;
+      const newY = cy - dy * newScale;
+      return { x: newX, y: newY, scale: newScale };
+    });
   };
 
   const handleMermaidFit = () => {
@@ -345,19 +341,21 @@ const MermaidPageComponent = ({
   };
 
   const handleMermaidWheel = useCallback((e) => {
-    const t = transformRef.current;
+    e.preventDefault();
     const rect = viewportRef.current ? viewportRef.current.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
     const vx = e.clientX - rect.left;
     const vy = e.clientY - rect.top;
-    e.preventDefault();
     const zoomSensitivity = 0.002;
-    const delta = -e.deltaY * zoomSensitivity * t.scale;
-    const newScale = clampScale(t.scale + delta);
-    const dx = (vx - t.x) / t.scale;
-    const dy = (vy - t.y) / t.scale;
-    const newX = vx - dx * newScale;
-    const newY = vy - dy * newScale;
-    setTransform({ x: newX, y: newY, scale: newScale });
+
+    setTransform(prev => {
+      const delta = -e.deltaY * zoomSensitivity * prev.scale;
+      const newScale = clampScale(prev.scale + delta);
+      const dx = (vx - prev.x) / prev.scale;
+      const dy = (vy - prev.y) / prev.scale;
+      const newX = vx - dx * newScale;
+      const newY = vy - dy * newScale;
+      return { x: newX, y: newY, scale: newScale };
+    });
   }, []);
 
   useEffect(() => {
@@ -431,15 +429,37 @@ const MermaidPageComponent = ({
       .then(({ svg, bindFunctions }) => {
         if (currentRenderId !== renderIdRef.current) return;
         mermaidBindFunctionsRef.current = bindFunctions;
-        setSvgContent(svg);
-        requestAnimationFrame(() => {
+
+        // Parse SVG to force absolute pixel dimensions for perfect scaling
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(svg, 'image/svg+xml');
+        const svgEl = doc.querySelector('svg');
+
+        if (svgEl) {
+          svgEl.style.maxWidth = 'none'; // Stop Mermaid from fighting our zoom scale
+          const viewBox = svgEl.getAttribute('viewBox');
+          if (viewBox) {
+            const parts = viewBox.split(/\s+/);
+            const vw = parseFloat(parts[2]);
+            const vh = parseFloat(parts[3]);
+            if (vw && vh) {
+              svgEl.setAttribute('width', vw);
+              svgEl.setAttribute('height', vh);
+            }
+          }
+          setSvgContent(svgEl.outerHTML);
+        } else {
+          setSvgContent(svg);
+        }
+
+        setTimeout(() => {
           if (currentRenderId !== renderIdRef.current) return;
-          if (!hasAppliedInitialFitRef.current && svgContainerRef.current && viewportRef.current) {
+          if (svgContainerRef.current && viewportRef.current) {
             const fitTransform = calculateZoomToFit();
             setTransform(fitTransform);
             hasAppliedInitialFitRef.current = true;
           }
-        });
+        }, 50);
       })
       .catch(() => {
         if (currentRenderId !== renderIdRef.current) return;
@@ -618,36 +638,6 @@ const MermaidPageComponent = ({
           <button onClick={() => handleViewModeChange('split')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'split' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Split</button>
           <button onClick={() => handleViewModeChange('preview')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${viewMode === 'preview' ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>Preview</button>
         </div>
-        {hasDiagram && (
-          <div className="flex items-center gap-1 ml-2 border-l border-gray-200 dark:border-gray-600 pl-2" title="Zoom and pan supported. Moving individual nodes is not supported; use the Mermaid source or spacing options to reduce overlap.">
-            <button
-              onClick={() => handleMermaidZoom(-MERMAID_ZOOM_STEP)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={transform.scale <= MERMAID_MIN_SCALE}
-              title="Zoom out"
-            >
-              <ZoomOut size={14} />
-            </button>
-            <span className="text-xs text-gray-600 dark:text-gray-400 w-10 text-center font-medium tabular-nums">
-              {Math.round(transform.scale * 100)}%
-            </span>
-            <button
-              onClick={() => handleMermaidZoom(MERMAID_ZOOM_STEP)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={transform.scale >= MERMAID_MAX_SCALE}
-              title="Zoom in"
-            >
-              <ZoomIn size={14} />
-            </button>
-            <button
-              onClick={handleMermaidFit}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 ml-1"
-              title="Reset view (Fit)"
-            >
-              <Maximize2 size={14} />
-            </button>
-          </div>
-        )}
       </div>
       <div ref={splitContainerRef} className={`flex-1 flex ${viewMode === 'split' ? 'flex-row' : 'flex-col'} relative overflow-hidden`}>
         {isDragging && (
@@ -655,7 +645,7 @@ const MermaidPageComponent = ({
         )}
         {/* EDITOR PANE */}
         {(viewMode === 'code' || viewMode === 'split') && (
-          <div className={`flex-1 flex flex-col bg-gray-50 dark:bg-gray-900 relative min-h-0 ${viewMode === 'split' ? 'border-r border-gray-200 dark:border-gray-700' : ''}`} style={viewMode === 'split' ? { width: `${splitRatio}%` } : { width: '100%' }}>
+          <div className={`flex flex-col bg-gray-50 dark:bg-gray-900 relative min-h-0 min-w-0 ${viewMode === 'split' ? 'border-r border-gray-200 dark:border-gray-700' : 'flex-1 w-full'}`} style={viewMode === 'split' ? { width: `${splitRatio}%` } : {}}>
             <div
               className="flex-1 w-full relative overflow-hidden flex flex-col"
               onKeyDown={(e) => {
@@ -710,9 +700,9 @@ const MermaidPageComponent = ({
         {(viewMode === 'preview' || viewMode === 'split') && (
           <div
             ref={viewportRef}
-            className="flex-1 flex flex-col bg-white dark:bg-gray-800 relative overflow-hidden min-h-0"
+            className={`flex flex-col bg-white dark:bg-gray-800 relative overflow-hidden min-h-0 min-w-0 ${viewMode === 'split' ? '' : 'flex-1 w-full'}`}
             style={{
-              width: viewMode === 'split' ? `${100 - splitRatio}%` : '100%',
+              ...(viewMode === 'split' ? { width: `${100 - splitRatio}%` } : {}),
               ...(codeType === 'mermaid' ? { touchAction: 'none', cursor: dragInfo ? 'grabbing' : 'grab' } : {}),
             }}
             {...(codeType === 'mermaid' ? {

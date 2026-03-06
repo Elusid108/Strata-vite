@@ -1,5 +1,5 @@
 // --- App Version ---
-export const APP_VERSION = "3.4.2";
+export const APP_VERSION = "3.4.3";
 
 // --- Debug ---
 export const DEBUG_SYNC = import.meta.env.VITE_STRATA_DEBUG_SYNC === 'true';

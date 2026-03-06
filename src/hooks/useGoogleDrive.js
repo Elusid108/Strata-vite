@@ -160,6 +160,17 @@ export function useGoogleDrive(data, setData, showNotification) {
     }
   }, []);
 
+  // Move an item physically in Google Drive
+  const moveItemInDrive = useCallback(async (itemId, newParentId, oldParentId) => {
+    if (!isAuthenticated || !itemId || !newParentId || !oldParentId) return;
+    try {
+      await GoogleAPI.moveDriveItem(itemId, newParentId, oldParentId);
+      log('SYNC', `Moved item ${itemId} from ${oldParentId} to ${newParentId}`);
+    } catch (error) {
+      log('ERROR', 'Error moving item in Drive:', error);
+    }
+  }, [isAuthenticated]);
+
   // Sync folder structure to Drive (uses dataRef to avoid re-running on every data change)
   useEffect(() => {
     if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !hasInitialLoadCompleted) return;
@@ -635,6 +646,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     triggerStructureSync,
     triggerContentSync,
     syncRenameToDrive,
-    queueDriveDelete
+    queueDriveDelete,
+    moveItemInDrive
   };
 }

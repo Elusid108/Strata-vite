@@ -32,6 +32,7 @@ export function StrataProvider({ children }) {
     triggerContentSync,
     syncRenameToDrive,
     queueDriveDelete,
+    moveItemInDrive,
     hasInitialLoadCompleted
   } = useGoogleDrive(data, setData, showNotification);
 
@@ -127,6 +128,7 @@ export function StrataProvider({ children }) {
     triggerContentSync,
     syncRenameToDrive,
     queueDriveDelete,
+    moveItemInDrive,
     hasInitialLoadCompleted,
     // History
     saveToHistory,

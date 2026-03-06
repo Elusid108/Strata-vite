@@ -23,6 +23,7 @@ export function useAppActions() {
     triggerStructureSync,
     triggerContentSync,
     queueDriveDelete,
+    moveItemInDrive,
     showNotification,
     activeNotebookId,
     activeTabId,
@@ -594,6 +595,7 @@ export function useAppActions() {
       saveToHistory();
       const newData = JSON.parse(JSON.stringify(data));
       let changed = false;
+      let driveMoveTask = null; // Track cross-folder moves
 
       const sourceNb = newData.notebooks.find((n) => n.id === dragData.sourceNotebookId);
       const sourceTab = sourceNb?.tabs.find((t) => t.id === dragData.sourceTabId);
@@ -607,10 +609,13 @@ export function useAppActions() {
       } else if (dragData.type === 'tab') {
         if (dropType === 'tab') {
           const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
-          if (sourceNb && targetNb && sourceNb.id === targetNb.id) {
+          if (sourceNb && targetNb) {
             const [movedTab] = sourceNb.tabs.splice(dragData.index, 1);
             targetNb.tabs.splice(targetIndex, 0, movedTab);
             changed = true;
+            if (sourceNb.id !== targetNb.id && movedTab.driveFolderId && targetNb.driveFolderId && sourceNb.driveFolderId) {
+              driveMoveTask = { itemId: movedTab.driveFolderId, newParentId: targetNb.driveFolderId, oldParentId: sourceNb.driveFolderId };
+            }
           }
         } else if (dropType === 'notebook') {
           const targetNb = newData.notebooks.find((n) => n.id === targetId);
@@ -618,16 +623,25 @@ export function useAppActions() {
             const [movedTab] = sourceNb.tabs.splice(dragData.index, 1);
             targetNb.tabs.push(movedTab);
             changed = true;
+            if (movedTab.driveFolderId && targetNb.driveFolderId && sourceNb.driveFolderId) {
+              driveMoveTask = { itemId: movedTab.driveFolderId, newParentId: targetNb.driveFolderId, oldParentId: sourceNb.driveFolderId };
+            }
           }
         }
       } else if (dragData.type === 'page') {
         if (dropType === 'page') {
           const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
           const targetTab = targetNb?.tabs.find((t) => t.id === activeTabId);
-          if (sourceTab && targetTab && sourceTab.id === targetTab.id) {
+          if (sourceTab && targetTab) {
             const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
             targetTab.pages.splice(targetIndex, 0, movedPage);
             changed = true;
+            if (sourceTab.id !== targetTab.id) {
+              const moveId = movedPage.driveLinkFileId || movedPage.driveFileId;
+              if (moveId && targetTab.driveFolderId && sourceTab.driveFolderId) {
+                driveMoveTask = { itemId: moveId, newParentId: targetTab.driveFolderId, oldParentId: sourceTab.driveFolderId };
+              }
+            }
           }
         } else if (dropType === 'tab') {
           const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
@@ -636,6 +650,10 @@ export function useAppActions() {
             const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
             targetTab.pages.push(movedPage);
             changed = true;
+            const moveId = movedPage.driveLinkFileId || movedPage.driveFileId;
+            if (moveId && targetTab.driveFolderId && sourceTab.driveFolderId) {
+              driveMoveTask = { itemId: moveId, newParentId: targetTab.driveFolderId, oldParentId: sourceTab.driveFolderId };
+            }
           }
         } else if (dropType === 'notebook') {
           const targetNb = newData.notebooks.find((n) => n.id === targetId);
@@ -644,6 +662,10 @@ export function useAppActions() {
             const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
             targetTab.pages.push(movedPage);
             changed = true;
+            const moveId = movedPage.driveLinkFileId || movedPage.driveFileId;
+            if (moveId && targetTab.driveFolderId && sourceTab.driveFolderId) {
+              driveMoveTask = { itemId: moveId, newParentId: targetTab.driveFolderId, oldParentId: sourceTab.driveFolderId };
+            }
           }
         }
       }
@@ -651,9 +673,13 @@ export function useAppActions() {
       if (changed) {
         setData(newData);
         triggerStructureSync();
+        // Physically move the underlying file so it doesn't revert on reload
+        if (driveMoveTask && moveItemInDrive) {
+          moveItemInDrive(driveMoveTask.itemId, driveMoveTask.newParentId, driveMoveTask.oldParentId);
+        }
       }
     },
-    [saveToHistory, data, setData, activeNotebookId, activeTabId, triggerStructureSync, setDragHoverTarget, dragHoverTimerRef]
+    [saveToHistory, data, setData, activeNotebookId, activeTabId, triggerStructureSync, moveItemInDrive, setDragHoverTarget, dragHoverTimerRef]
   );
 
   const handleFavoriteDrop = useCallback(

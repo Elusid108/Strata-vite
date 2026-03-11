@@ -29,6 +29,10 @@ Created by **Chris Moore Designs LLC**.
 * **Background Tabs:** Embedded pages remain alive in the background when navigating away, ensuring instant load times and preserved state (like switching Chrome tabs) when you return.
 * **Drive File Blocks:** Link directly to Drive files within your block pages, displaying real-time file names, types, and open/remove controls.
 
+### ⚡ Performance & Persistence
+* **Smart Background Loading:** Keeps your most recently used Google Sheets, Docs, and Web Boards active in the background for instant switching without reloads.
+* **LRU Memory Management:** Automatically unmounts oldest background pages to save system memory (configurable in settings).
+
 ### 🔒 Privacy & Performance
 * **100% Client-Side:** No external databases. No analytics. No tracking cookies. 
 * **Drive Sync Engine:** Your data is saved as lightweight `.json` files in your personal Google Drive. 

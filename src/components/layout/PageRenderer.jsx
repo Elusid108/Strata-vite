@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { getPickerPosition, getActiveContext } from '../../lib/utils';
 
 const formatTimestamp = (ts) => {
@@ -36,6 +37,7 @@ export function PageRenderer() {
     pageIconPicker,
     isAuthenticated,
     viewedEmbedPages,
+    setViewedEmbedPages,
     titleInputRef,
     autoFocusId,
     setMapConfigBlockId,
@@ -71,13 +73,37 @@ export function PageRenderer() {
   } = useAppActions();
 
   const { page: activePage } = getActiveContext(data, activeNotebookId, activeTabId, activePageId);
+
+  // Safely track LRU usage: move the active page to the back of the Set without causing an infinite loop
+  useEffect(() => {
+    if (activePage?.embedUrl) {
+      setViewedEmbedPages(prev => {
+        const arr = Array.from(prev);
+        if (arr[arr.length - 1] === activePage.id) return prev; // Already most recent
+        const next = new Set(prev);
+        next.delete(activePage.id);
+        next.add(activePage.id);
+        return next;
+      });
+    }
+  }, [activePage?.id, activePage?.embedUrl, setViewedEmbedPages]);
+
+  // CRITICAL FIX: Iframes reload and lose state if their parent DOM node changes sibling order.
+  // Because our LRU moves IDs to the end of the Set, we MUST sort them
+  // alphabetically here so their DOM sequence never changes during navigation!
+  const embedPagesToRender = Array.from(viewedEmbedPages);
+  if (activePage?.embedUrl && !embedPagesToRender.includes(activePage.id)) {
+    embedPagesToRender.push(activePage.id);
+  }
+  embedPagesToRender.sort();
+
   const createdAtInfo = activePage?.createdAt ? formatTimestamp(activePage.createdAt) : null;
 
   const totalBlocks = pageTree ? countBlocksInTree(pageTree) : 0;
 
   return (
     <>
-      {Array.from(viewedEmbedPages).map((pageId) => {
+      {embedPagesToRender.map((pageId) => {
         let p = null,
           nbId,
           tId;

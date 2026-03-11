@@ -36,7 +36,6 @@ export function useAppActions() {
     setEditingNotebookId,
     setShouldFocusTitle,
     setCreationFlow,
-    setViewedEmbedPages,
     selectedBlockId,
     setSelectedBlockId,
     setActiveTabMenu,
@@ -108,16 +107,6 @@ export function useAppActions() {
       setEditingTabId(null);
       setEditingNotebookId(null);
 
-      const page = data.notebooks.flatMap((nb) => nb.tabs.flatMap((t) => t.pages)).find((p) => p.id === pageId);
-      if (page?.embedUrl) {
-        setViewedEmbedPages((prev) => {
-          const next = new Set(prev);
-          next.delete(pageId);
-          next.add(pageId);
-          return next;
-        });
-      }
-
       setData((prev) => ({
         ...prev,
         notebooks: prev.notebooks.map((nb) =>
@@ -130,7 +119,7 @@ export function useAppActions() {
         ),
       }));
     },
-    [flushAndClearSync, setData, activeNotebookId, activeTabId, data.notebooks, setActivePageId, setViewedEmbedPages, setEditingPageId, setEditingTabId, setEditingNotebookId]
+    [flushAndClearSync, setData, activeNotebookId, activeTabId, data.notebooks, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId]
   );
 
   const getStarredPages = useCallback(() => {
@@ -310,17 +299,12 @@ export function useAppActions() {
       };
       setData(newData);
       setActivePageId(newPage.id);
-      setViewedEmbedPages(prev => {
-        const next = new Set(prev);
-        next.add(newPage.id);
-        return next;
-      });
       showNotification(`${pageName} added`, 'success');
       triggerStructureSync();
       triggerContentSync(newPage.id);
       return true;
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId, setViewedEmbedPages]
+    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
   );
 
   const addGooglePage = useCallback(
@@ -405,16 +389,11 @@ export function useAppActions() {
       };
       setData(newData);
       setActivePageId(newPage.id);
-      setViewedEmbedPages(prev => {
-        const next = new Set(prev);
-        next.add(newPage.id);
-        return next;
-      });
       showNotification(`${file.name || 'Google ' + typeName} added`, 'success');
       triggerStructureSync();
       triggerContentSync(newPage.id);
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId, setViewedEmbedPages]
+    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
   );
 
   const executeDelete = useCallback(

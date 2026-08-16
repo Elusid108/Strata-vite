@@ -4,12 +4,14 @@
  * until Drive confirms trashed=true so reloads cannot resurrect them.
  */
 
-import { INITIAL_DATA } from './constants';
+import { createInitialData, INITIAL_DATA } from './constants';
 
 const STORAGE_KEY = 'strata_sync_state';
 const DATA_KEY = 'note-app-data-v1';
+const GUEST_BASELINE_KEY = 'strata_guest_baseline';
 
 let liveTree = null;
+let persistLocked = false;
 
 export function setLiveTree(data) {
   liveTree = data;
@@ -93,14 +95,87 @@ export function isPlaceholderData(data) {
   return data.notebooks[0]?.id === 'nb1';
 }
 
-export function persistNotebookData(data) {
-  if (!data) return;
+export function isGuestTree(data) {
+  const notebooks = data?.notebooks || [];
+  if (!notebooks.length) return true;
+  return notebooks.every((nb) => !nb.driveFolderId);
+}
+
+function stripVolatile(value) {
+  if (Array.isArray(value)) return value.map(stripVolatile);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [key, nested] of Object.entries(value)) {
+      if (key === 'createdAt' || key === 'modifiedAt') continue;
+      out[key] = stripVolatile(nested);
+    }
+    return out;
+  }
+  return value;
+}
+
+export function fingerprintGuestTree(data) {
+  return JSON.stringify(stripVolatile(data || { notebooks: [] }));
+}
+
+export function guestWorkspaceHasEdits(data) {
+  if (!data?.notebooks?.length) return false;
+  if (!isGuestTree(data)) return false;
+  const current = fingerprintGuestTree(data);
+  const baseline = localStorage.getItem(GUEST_BASELINE_KEY);
+  if (baseline) return current !== baseline;
+  return current !== fingerprintGuestTree(createInitialData());
+}
+
+export function clearGuestBaseline() {
+  localStorage.removeItem(GUEST_BASELINE_KEY);
+}
+
+function removeStrataCaches(storage) {
+  for (let i = storage.length - 1; i >= 0; i--) {
+    const key = storage.key(i);
+    if (key && key.startsWith('strata-cache-')) storage.removeItem(key);
+  }
+}
+
+function writeNotebookDataUnlocked(data) {
   setLiveTree(data);
   try {
     localStorage.setItem(DATA_KEY, JSON.stringify(data));
   } catch {
     /* quota or disabled */
   }
+}
+
+/**
+ * Replace local Drive state with a fresh one-notebook sandbox.
+ * When lockPersist is true (sign-out), later persistNotebookData calls no-op until reload.
+ */
+export function installGuestWorkspace({ lockPersist = true } = {}) {
+  if (lockPersist) persistLocked = true;
+  clearSyncState();
+  try {
+    localStorage.removeItem(DATA_KEY);
+    localStorage.removeItem('strata_last_view');
+    localStorage.removeItem('strata_last_synced_hash');
+    removeStrataCaches(localStorage);
+    removeStrataCaches(sessionStorage);
+  } catch {
+    /* storage disabled */
+  }
+  const data = createInitialData();
+  writeNotebookDataUnlocked(data);
+  try {
+    localStorage.setItem(GUEST_BASELINE_KEY, fingerprintGuestTree(data));
+  } catch {
+    /* quota or disabled */
+  }
+  return data;
+}
+
+export function persistNotebookData(data) {
+  if (persistLocked || !data) return;
+  writeNotebookDataUnlocked(data);
 }
 
 export function getSyncState() {

@@ -4,9 +4,11 @@ import {
   BLOCK_TYPES,
   DRIVE_LOGO_URL,
   DRIVE_SERVICE_ICONS,
+  createInitialData,
 } from '../../lib/constants';
 import { findBlockInRows, updatePageInData, COLOR_BG_CLASSES } from '../../lib/utils';
-import { collectDriveOnlyIds } from '../../lib/sync-merge';
+import { collectDriveOnlyIds, mergeDriveWithLocal } from '../../lib/sync-merge';
+import { clearGuestBaseline, pendingPageIds, persistNotebookData, tombstoneIdSet } from '../../lib/sync-outbox';
 import * as GoogleAPI from '../../lib/google-api';
 import * as emoji from 'node-emoji';
 import {
@@ -26,6 +28,31 @@ import { useStrata } from '../../contexts/StrataContext';
 import { usePageContent } from '../../hooks/usePageContent';
 import { useBlockEditor } from '../../hooks/useBlockEditor';
 import { useAppActions } from '../../hooks/useAppActions';
+
+function activateFromTree(tree, setActiveNotebookId, setActiveTabId, setActivePageId) {
+  if (!tree?.notebooks?.length) return;
+  let tgtNb;
+  let tgtTab;
+  let tgtPg;
+  try {
+    const last = JSON.parse(localStorage.getItem('strata_last_view'));
+    if (last) {
+      tgtNb = last.activeNotebookId;
+      tgtTab = last.activeTabId;
+      tgtPg = last.activePageId;
+    }
+  } catch {
+    /* ignore */
+  }
+  const nb = tree.notebooks.find((n) => n.id === tgtNb) || tree.notebooks[0];
+  setActiveNotebookId(nb.id);
+  const tabs = nb.tabs || [];
+  const tab = tabs.find((t) => t.id === tgtTab) || tabs.find((t) => t.id === nb.activeTabId) || tabs[0];
+  setActiveTabId(tab?.id || null);
+  const pages = tab?.pages || [];
+  const page = pages.find((p) => p.id === tgtPg) || pages.find((p) => p.id === tab.activePageId) || pages[0];
+  setActivePageId(page?.id || null);
+}
 
 export function ModalsContainer() {
   const {
@@ -64,6 +91,7 @@ export function ModalsContainer() {
     activePageId,
     isAuthenticated,
     hasInitialLoadCompleted,
+    markInitialLoadComplete,
     notification,
     showNotification,
     driveUrlModalValue,
@@ -329,7 +357,7 @@ export function ModalsContainer() {
         <div className="fixed inset-0 bg-black/50 z-[10001] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 max-w-sm w-full">
             <h3 className="font-bold text-lg mb-2 dark:text-white">Sign out of Google?</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Your data will remain synced. You can sign back in anytime.</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">Your Google Drive notebooks stay as they are. This device will reset to a local sandbox until you sign back in.</p>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowSignOutConfirm(false)}
@@ -352,48 +380,101 @@ export function ModalsContainer() {
       {syncConflict && (
         <div className="fixed inset-0 bg-black/50 z-[10002] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full p-6">
-            <h3 className="font-bold text-xl mb-3 flex items-center gap-2 dark:text-white">
-              <AlertCircle className="text-yellow-500" /> Offline Changes Detected
-            </h3>
-            <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed text-sm">
-              We found local changes on this device that haven't been saved to Google Drive. Which version would you like to keep?
-            </p>
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={() => {
-                  const extra = collectDriveOnlyIds(syncConflict.localData, syncConflict.driveData);
-                  if (extra.length) queueDriveDelete(extra);
-                  setData(syncConflict.localData);
-                  triggerStructureSync(syncConflict.localData);
-                  setSyncConflict(null);
-                }}
-                className="w-full text-left p-4 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
-              >
-                <div className="font-bold text-blue-700 dark:text-blue-300 mb-1">Keep Local Changes</div>
-                <div className="text-xs text-blue-600 dark:text-blue-400">Overwrites Google Drive with the unsynced data currently on this device.</div>
-              </button>
-              <button
-                onClick={() => {
-                  setData(syncConflict.driveData);
-                  localStorage.setItem('strata_last_synced_hash', JSON.stringify(syncConflict.driveData.notebooks));
-                  setSyncConflict(null);
+            {syncConflict.mode === 'guest' ? (
+              <>
+                <h3 className="font-bold text-xl mb-3 flex items-center gap-2 dark:text-white">
+                  <AlertCircle className="text-yellow-500" /> Keep your sandbox notes?
+                </h3>
+                <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed text-sm">
+                  You added notes while signed out. Merge them into your Google Drive notebooks, or discard them and load Drive as-is.
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => {
+                      const merged = mergeDriveWithLocal(syncConflict.localData, syncConflict.driveData, {
+                        tombstoneIds: tombstoneIdSet(),
+                        pendingPageIds: pendingPageIds(),
+                      });
+                      const next = merged?.notebooks?.length
+                        ? merged
+                        : (syncConflict.driveData?.notebooks?.length ? syncConflict.driveData : createInitialData());
+                      setData(next);
+                      persistNotebookData(next);
+                      activateFromTree(next, setActiveNotebookId, setActiveTabId, setActivePageId);
+                      clearGuestBaseline();
+                      markInitialLoadComplete();
+                      setSyncConflict(null);
+                    }}
+                    className="w-full text-left p-4 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                  >
+                    <div className="font-bold text-blue-700 dark:text-blue-300 mb-1">Merge into Drive</div>
+                    <div className="text-xs text-blue-600 dark:text-blue-400">Adds what you created while signed out next to your existing Google Drive notebooks.</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const next = syncConflict.driveData?.notebooks?.length
+                        ? syncConflict.driveData
+                        : createInitialData();
+                      setData(next);
+                      persistNotebookData(next);
+                      activateFromTree(next, setActiveNotebookId, setActiveTabId, setActivePageId);
+                      clearGuestBaseline();
+                      markInitialLoadComplete();
+                      setSyncConflict(null);
+                    }}
+                    className="w-full text-left p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="font-bold text-gray-700 dark:text-gray-300 mb-1">Discard sandbox</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Throws away unsigned-in notes and loads your Google Drive notebooks.</div>
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="font-bold text-xl mb-3 flex items-center gap-2 dark:text-white">
+                  <AlertCircle className="text-yellow-500" /> Offline Changes Detected
+                </h3>
+                <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed text-sm">
+                  We found local changes on this device that haven't been saved to Google Drive. Which version would you like to keep?
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => {
+                      const extra = collectDriveOnlyIds(syncConflict.localData, syncConflict.driveData);
+                      if (extra.length) queueDriveDelete(extra);
+                      setData(syncConflict.localData);
+                      triggerStructureSync(syncConflict.localData);
+                      setSyncConflict(null);
+                    }}
+                    className="w-full text-left p-4 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                  >
+                    <div className="font-bold text-blue-700 dark:text-blue-300 mb-1">Keep Local Changes</div>
+                    <div className="text-xs text-blue-600 dark:text-blue-400">Overwrites Google Drive with the unsynced data currently on this device.</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setData(syncConflict.driveData);
+                      localStorage.setItem('strata_last_synced_hash', JSON.stringify(syncConflict.driveData.notebooks));
+                      setSyncConflict(null);
 
-                  if (syncConflict.driveData.notebooks?.length > 0) {
-                    const nb = syncConflict.driveData.notebooks[0];
-                    setActiveNotebookId(nb.id);
-                    const tab = nb.tabs[0];
-                    if (tab) {
-                      setActiveTabId(tab.id);
-                      setActivePageId(tab.pages[0]?.id || null);
-                    }
-                  }
-                }}
-                className="w-full text-left p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-              >
-                <div className="font-bold text-gray-700 dark:text-gray-300 mb-1">Discard Local & Load from Drive</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Reverts to the last safely synced state from Google Drive.</div>
-              </button>
-            </div>
+                      if (syncConflict.driveData.notebooks?.length > 0) {
+                        const nb = syncConflict.driveData.notebooks[0];
+                        setActiveNotebookId(nb.id);
+                        const tab = nb.tabs[0];
+                        if (tab) {
+                          setActiveTabId(tab.id);
+                          setActivePageId(tab.pages[0]?.id || null);
+                        }
+                      }
+                    }}
+                    className="w-full text-left p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="font-bold text-gray-700 dark:text-gray-300 mb-1">Discard Local & Load from Drive</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Reverts to the last safely synced state from Google Drive.</div>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -723,7 +804,7 @@ export function ModalsContainer() {
         </div>
       )}
 
-      {isAuthenticated && !hasInitialLoadCompleted && (
+      {isAuthenticated && !hasInitialLoadCompleted && !syncConflict && (
         <div className="fixed inset-0 z-[9999] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm flex flex-col items-center justify-center">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
           <h2 className="text-xl font-bold text-gray-800 dark:text-white">Loading Workspace</h2>

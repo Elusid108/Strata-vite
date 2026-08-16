@@ -8,7 +8,7 @@ import {
   peekOp,
   hasPendingOps,
   persistNotebookData,
-  clearSyncState,
+  installGuestWorkspace,
   SyncNotReadyError,
   getLiveTree,
   getSyncState,
@@ -227,17 +227,8 @@ export function useGoogleDrive(data, setData, showNotification) {
   }, [showNotification]);
 
   const handleSignOut = useCallback(() => {
-    log('SYNC', 'handleSignOut: clearing local storage');
-    localStorage.removeItem('note-app-data-v1');
-    clearSyncState();
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('strata-cache-')) localStorage.removeItem(key);
-    }
-    for (let i = sessionStorage.length - 1; i >= 0; i--) {
-      const key = sessionStorage.key(i);
-      if (key && key.startsWith('strata-cache-')) sessionStorage.removeItem(key);
-    }
+    log('SYNC', 'handleSignOut: installing guest sandbox');
+    installGuestWorkspace({ lockPersist: true });
     GoogleAPI.signOut();
     setIsAuthenticated(false);
     setUserEmail(null);
@@ -433,6 +424,11 @@ export function useGoogleDrive(data, setData, showNotification) {
     setHasInitialLoadCompleted(true);
   }, []);
 
+  const beginAuthenticatedLoad = useCallback(() => {
+    bootEnqueuedRef.current = false;
+    setHasInitialLoadCompleted(false);
+  }, []);
+
   const syncRenameToDrive = useCallback(
     (type, id) => {
       const currentData = dataRef.current;
@@ -509,6 +505,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     syncStatus,
     hasInitialLoadCompleted,
     markInitialLoadComplete,
+    beginAuthenticatedLoad,
     handleSignIn,
     handleSignOut,
     loadFromDrive,

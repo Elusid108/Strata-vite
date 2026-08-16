@@ -1,5 +1,5 @@
 // --- App Version ---
-export const APP_VERSION = "3.5.0";
+export const APP_VERSION = "3.6.0";
 
 // --- Debug ---
 export const DEBUG_SYNC = import.meta.env.VITE_STRATA_DEBUG_SYNC === 'true';
@@ -118,39 +118,43 @@ export const DEFAULT_ROWS = [
   { id: 'r1', c1: 'Example Item', c2: 'Idea', c3: 1, c4: false }
 ];
 
-// --- Initial Data ---
-export const INITIAL_DATA = {
-  notebooks: [
-    {
-      id: 'nb1', name: 'My First Notebook', icon: '📓', activeTabId: 'tab1',
-      tabs: [
-        {
-          id: 'tab1', name: 'General', icon: '📋', color: 'blue', activePageId: 'page1',
-          pages: [
-            {
-              id: 'page1',
-              name: 'Welcome',
-              createdAt: Date.now(),
-              icon: '👋',
-              cover: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1200&q=80',
-              rows: [
-                {
-                  id: 'row1', columns: [
-                    {
-                      id: 'col1', blocks: [
-                        { id: 'blk1', type: 'h1', content: 'Welcome to Strata Sandbox!' },
-                        { id: 'blk2', type: 'text', content: '<b>⚠️ Notice:</b> This is a temporary sandbox environment. Any changes made here will be wiped upon login.' },
-                        { id: 'blk3', type: 'text', content: 'Please <b>Sign in with Google</b> on the left to create your persistent workspace.' },
-                        { id: 'blk4', type: 'text', content: 'Feel free to experiment with blocks, dragging, and formatting before signing in!' }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  ]
-};
+export function createInitialData() {
+  const now = Date.now();
+  return {
+    notebooks: [
+      {
+        id: 'nb1', name: 'My First Notebook', icon: '📓', activeTabId: 'tab1',
+        tabs: [
+          {
+            id: 'tab1', name: 'General', icon: '📋', color: 'blue', activePageId: 'page1',
+            pages: [
+              {
+                id: 'page1',
+                name: 'Welcome',
+                createdAt: now,
+                icon: '👋',
+                cover: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1200&q=80',
+                rows: [
+                  {
+                    id: 'row1', columns: [
+                      {
+                        id: 'col1', blocks: [
+                          { id: 'blk1', type: 'h1', content: 'Welcome to Strata Sandbox!' },
+                          { id: 'blk2', type: 'text', content: '<b>⚠️ Notice:</b> This is a temporary sandbox. Sign in with Google to use your Drive notebooks. If you add notes here first, you can merge them into Drive or discard them when you sign in.' },
+                          { id: 'blk3', type: 'text', content: 'Please <b>Sign in with Google</b> on the left to open your persistent workspace.' },
+                          { id: 'blk4', type: 'text', content: 'Feel free to experiment with blocks, dragging, and formatting before signing in!' }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+export const INITIAL_DATA = createInitialData();

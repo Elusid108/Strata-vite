@@ -37,6 +37,7 @@ export function StrataProvider({ children }) {
     moveItemInDrive,
     hasInitialLoadCompleted,
     markInitialLoadComplete,
+    beginAuthenticatedLoad,
   } = useGoogleDrive(data, setData, showNotification);
 
   useEffect(() => {
@@ -140,6 +141,7 @@ export function StrataProvider({ children }) {
     moveItemInDrive,
     hasInitialLoadCompleted,
     markInitialLoadComplete,
+    beginAuthenticatedLoad,
     // History
     saveToHistory,
     undo,

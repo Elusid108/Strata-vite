@@ -1,8 +1,16 @@
 import { useEffect, useRef } from 'react';
-import { INITIAL_DATA } from '../lib/constants';
+import { createInitialData } from '../lib/constants';
 import { log } from '../lib/logger';
 import { useStrata } from '../contexts/StrataContext';
-import { isPlaceholderData, pendingPageIds, persistNotebookData, tombstoneIdSet } from '../lib/sync-outbox';
+import {
+  clearGuestBaseline,
+  guestWorkspaceHasEdits,
+  installGuestWorkspace,
+  isGuestTree,
+  pendingPageIds,
+  persistNotebookData,
+  tombstoneIdSet,
+} from '../lib/sync-outbox';
 import { mergeDriveWithLocal } from '../lib/sync-merge';
 
 /**
@@ -21,7 +29,9 @@ export function useDataLoader() {
     setActiveTabId,
     setActivePageId,
     markInitialLoadComplete,
+    beginAuthenticatedLoad,
     triggerContentSync,
+    setSyncConflict,
   } = useStrata();
 
   const triggerContentSyncRef = useRef(triggerContentSync);
@@ -51,64 +61,82 @@ export function useDataLoader() {
 
         const nb = loadedData.notebooks.find((n) => n.id === tgtNb) || loadedData.notebooks[0];
         setActiveNotebookId(nb.id);
-        const tab = nb.tabs.find((t) => t.id === tgtTab) || nb.tabs.find((t) => t.id === nb.activeTabId) || nb.tabs[0];
+        const tabs = nb.tabs || [];
+        const tab = tabs.find((t) => t.id === tgtTab) || tabs.find((t) => t.id === nb.activeTabId) || tabs[0];
         setActiveTabId(tab?.id || null);
-        const page = tab?.pages.find((p) => p.id === tgtPg) || tab?.pages.find((p) => p.id === tab.activePageId) || tab?.pages[0];
+        const pages = tab?.pages || [];
+        const page = pages.find((p) => p.id === tgtPg) || pages.find((p) => p.id === tab?.activePageId) || pages[0];
         setActivePageId(page?.id || null);
         return true;
       };
 
+      const applyTree = (tree) => {
+        setData(tree);
+        persistNotebookData(tree);
+        setActiveFromData(tree);
+      };
+
       if (isAuthenticated) {
+        beginAuthenticatedLoad();
+        let awaitingGuestChoice = false;
         try {
           const localRaw = loadFromLocalStorage();
-          const localData = isPlaceholderData(localRaw) ? { notebooks: [] } : localRaw;
           const driveData = await loadFromDrive();
 
-          const merged = mergeDriveWithLocal(localData, driveData, {
-            tombstoneIds: tombstoneIdSet(),
-            pendingPageIds: pendingPageIds(),
-          });
+          if (isGuestTree(localRaw) && guestWorkspaceHasEdits(localRaw)) {
+            log('SYNC', 'loadData: guest sandbox has edits, waiting for merge/discard');
+            setSyncConflict({ mode: 'guest', localData: localRaw, driveData });
+            awaitingGuestChoice = true;
+            return;
+          }
 
-          const hasTree = merged?.notebooks?.length > 0;
-          if (hasTree) {
-            setData(merged);
-            persistNotebookData(merged);
-            setActiveFromData(merged);
-            enqueueRecoveryPatches(localData, driveData, triggerContentSyncRef.current);
-          } else if (driveData?.notebooks?.length) {
-            setData(driveData);
-            persistNotebookData(driveData);
-            setActiveFromData(driveData);
+          clearGuestBaseline();
+
+          if (!localRaw?.notebooks?.length || isGuestTree(localRaw)) {
+            const next = driveData?.notebooks?.length ? driveData : createInitialData();
+            applyTree(next);
           } else {
-            setData(INITIAL_DATA);
-            setActiveFromData(INITIAL_DATA);
+            const merged = mergeDriveWithLocal(localRaw, driveData, {
+              tombstoneIds: tombstoneIdSet(),
+              pendingPageIds: pendingPageIds(),
+            });
+            const hasTree = merged?.notebooks?.length > 0;
+            if (hasTree) {
+              applyTree(merged);
+              enqueueRecoveryPatches(localRaw, driveData, triggerContentSyncRef.current);
+            } else if (driveData?.notebooks?.length) {
+              applyTree(driveData);
+            } else {
+              applyTree(createInitialData());
+            }
           }
         } catch (error) {
           console.error('Error loading from Drive:', error);
           showNotification('Failed to load from Drive. Using local data as fallback.', 'error');
           log('SYNC', 'loadData: Drive failed, fallback to localStorage');
           const localData = loadFromLocalStorage();
-          if (localData?.notebooks?.length > 0 && !isPlaceholderData(localData)) {
-            setData(localData);
-            setActiveFromData(localData);
+          if (localData?.notebooks?.length > 0 && !isGuestTree(localData)) {
+            applyTree(localData);
+          } else if (localData?.notebooks?.length > 0) {
+            applyTree(localData);
           } else {
-            log('SYNC', 'loadData: localStorage empty, using INITIAL_DATA');
-            setData(INITIAL_DATA);
-            setActiveFromData(INITIAL_DATA);
+            log('SYNC', 'loadData: localStorage empty, using createInitialData');
+            applyTree(createInitialData());
           }
         } finally {
-          markInitialLoadComplete();
+          if (!awaitingGuestChoice) markInitialLoadComplete();
         }
       } else {
         const localData = loadFromLocalStorage();
-        if (localData?.notebooks?.length > 0) {
-          log('SYNC', 'loadData: not signed in, using localStorage', { notebookCount: localData.notebooks.length });
+        if (localData?.notebooks?.length > 0 && isGuestTree(localData)) {
+          log('SYNC', 'loadData: not signed in, using guest localStorage', { notebookCount: localData.notebooks.length });
           setData(localData);
           setActiveFromData(localData);
         } else {
-          log('SYNC', 'loadData: not signed in, localStorage empty, using INITIAL_DATA');
-          setData(INITIAL_DATA);
-          setActiveFromData(INITIAL_DATA);
+          log('SYNC', 'loadData: not signed in, installing guest workspace');
+          const guest = installGuestWorkspace({ lockPersist: false });
+          setData(guest);
+          setActiveFromData(guest);
         }
         markInitialLoadComplete();
       }
@@ -126,6 +154,8 @@ export function useDataLoader() {
     setActiveTabId,
     setActivePageId,
     markInitialLoadComplete,
+    beginAuthenticatedLoad,
+    setSyncConflict,
   ]);
 }
 

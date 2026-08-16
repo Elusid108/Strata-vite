@@ -618,6 +618,33 @@ class DriveRequestError extends Error {
     }
 }
 
+const etagFromResponse = (response) => {
+    if (!response) return null;
+    const headers = response.headers;
+    if (!headers) return null;
+    if (typeof headers.get === 'function') {
+        return headers.get('ETag') || headers.get('etag') || null;
+    }
+    return headers.ETag || headers.etag || headers['ETag'] || headers['etag'] || null;
+};
+
+const getDriveErrorMessage = (error) => {
+    if (!error) return 'Drive request failed';
+    const fromResult = error.result?.error?.message;
+    if (fromResult) return fromResult;
+    const raw = error.body || error.message;
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            if (parsed?.error?.message) return parsed.error.message;
+        } catch {
+            /* not JSON */
+        }
+        if (error.message) return error.message;
+    }
+    return 'Drive request failed';
+};
+
 const toStrataProperties = (properties = {}) => {
     const props = {};
     if (properties.appId !== undefined) props.strata_appId = String(properties.appId);
@@ -637,8 +664,8 @@ const driveMultipartUpload = async ({ fileId, metadata, content, etag }) => {
     }
     const isUpdate = !!fileId;
     const url = isUpdate
-        ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,etag,name`
-        : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,etag,name`;
+        ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,name`
+        : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name`;
     const headers = { Authorization: `Bearer ${accessToken}` };
     if (isUpdate && etag) headers['If-Match'] = etag;
     const response = await fetch(url, {
@@ -648,23 +675,24 @@ const driveMultipartUpload = async ({ fileId, metadata, content, etag }) => {
     });
     if (!response.ok) {
         const text = await response.text().catch(() => '');
-        throw new DriveRequestError(text || response.statusText, response.status);
+        throw new DriveRequestError(getDriveErrorMessage({ message: text || response.statusText }), response.status);
     }
-    return response.json();
+    const result = await response.json();
+    return { ...result, etag: etagFromResponse(response) || result.etag };
 };
 
 const findFileByAppId = async (parentId, appId, mimeType = null) => {
     if (!parentId || !appId) return null;
     await ensureAuthenticated();
-    const escaped = String(appId).replace(/'/g, "\\'");
-    let q = `'${parentId}' in parents and trashed=false and properties has { key='strata_appId' and value='${escaped}' }`;
+    let q = `'${parentId}' in parents and trashed=false`;
     if (mimeType) q += ` and mimeType='${mimeType}'`;
     const response = await gapi.client.drive.files.list({
         q,
-        fields: 'files(id, name, etag, properties)',
-        pageSize: 1
+        fields: 'files(id, name, properties, mimeType)',
+        pageSize: 100
     });
-    return response.result.files?.[0] || null;
+    const files = response.result.files || [];
+    return files.find((file) => (file.properties || {}).strata_appId === String(appId)) || null;
 };
 
 const createFolderWithAppId = async (name, parentId, appId, properties = {}) => {
@@ -677,9 +705,9 @@ const createFolderWithAppId = async (name, parentId, appId, properties = {}) => 
     if (parentId) fileMetadata.parents = [parentId];
     const response = await gapi.client.drive.files.create({
         resource: fileMetadata,
-        fields: 'id, name, etag, properties'
+        fields: 'id, name, properties'
     });
-    return { id: response.result.id, etag: response.result.etag };
+    return { id: response.result.id, etag: etagFromResponse(response) };
 };
 
 const updateFolderExact = async (folderId, name, properties = {}) => {
@@ -690,18 +718,18 @@ const updateFolderExact = async (folderId, name, properties = {}) => {
     const response = await gapi.client.drive.files.update({
         fileId: folderId,
         resource: metadata,
-        fields: 'id, name, etag'
+        fields: 'id, name'
     });
-    return { id: response.result.id, etag: response.result.etag };
+    return { id: response.result.id, etag: etagFromResponse(response) };
 };
 
 const getFileEtag = async (fileId) => {
     await ensureAuthenticated();
     const response = await gapi.client.drive.files.get({
         fileId,
-        fields: 'id, etag, trashed, name'
+        fields: 'id, trashed, name'
     });
-    return response.result;
+    return { ...response.result, etag: etagFromResponse(response) };
 };
 
 // File save: update by ID only, or create new. Never reuse a different file by name.
@@ -757,7 +785,7 @@ const saveFolderIdempotent = async (folderId, name, parentId, properties = {}) =
         if (folderId) {
             const existing = await gapi.client.drive.files.get({
                 fileId: folderId,
-                fields: 'id, name, trashed, etag'
+                fields: 'id, name, trashed'
             });
             if (existing.result.trashed) {
                 throw new DriveRequestError('Folder is trashed', 404);
@@ -767,7 +795,7 @@ const saveFolderIdempotent = async (folderId, name, parentId, properties = {}) =
             const response = await gapi.client.drive.files.update({
                 fileId: folderId,
                 resource: metadata,
-                fields: 'id, name, etag'
+                fields: 'id, name'
             });
             return response.result.id;
         }
@@ -780,7 +808,7 @@ const saveFolderIdempotent = async (folderId, name, parentId, properties = {}) =
         if (Object.keys(props).length > 0) fileMetadata.properties = props;
         const response = await gapi.client.drive.files.create({
             resource: fileMetadata,
-            fields: 'id, name, etag'
+            fields: 'id, name'
         });
         return response.result.id;
     } catch (error) {
@@ -1969,7 +1997,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
         // List notebook folders in root
         const notebooksResponse = await gapi.client.drive.files.list({
             q: `'${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-            fields: 'files(id, name, properties, etag)',
+            fields: 'files(id, name, properties)',
             orderBy: 'name'
         });
         
@@ -2019,7 +2047,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
         for (const notebook of notebooks) {
             const tabsResponse = await gapi.client.drive.files.list({
                 q: `'${notebook.driveFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-                fields: 'files(id, name, properties, etag)',
+                fields: 'files(id, name, properties)',
                 orderBy: 'name'
             });
             
@@ -2075,7 +2103,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
             for (const tab of tabs) {
                 const pagesResponse = await gapi.client.drive.files.list({
                     q: `'${tab.driveFolderId}' in parents and mimeType='application/json' and trashed=false`,
-                    fields: 'files(id, name, properties, etag)',
+                    fields: 'files(id, name, properties)',
                     orderBy: 'name'
                 });
                 
@@ -3144,6 +3172,7 @@ export {
     writePageJson,
     writeLinkJson,
     DriveRequestError,
+    getDriveErrorMessage,
     // Index file functions
     getIndexFile,
     saveIndexFile,
@@ -3218,6 +3247,8 @@ export default {
     updateFolderExact,
     writePageJson,
     writeLinkJson,
+    DriveRequestError,
+    getDriveErrorMessage,
     getIndexFile,
     saveIndexFile,
     saveNotebookFolder,

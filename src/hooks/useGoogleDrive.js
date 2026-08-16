@@ -132,7 +132,7 @@ export function useGoogleDrive(data, setData, showNotification) {
             phase: 'retrying',
             completed: completedRef.current,
             error: {
-              message: error.message || 'Drive request failed',
+              message: GoogleAPI.getDriveErrorMessage(error),
               status: error.status || error.result?.error?.code || null,
               retryAt: Date.now() + delay,
             },
@@ -263,7 +263,7 @@ export function useGoogleDrive(data, setData, showNotification) {
         log('ERROR', 'Error initializing Drive sync:', error);
         publishSyncStatus({
           phase: 'idle',
-          error: { message: error.message || 'Could not connect to Drive', status: error.status || null, retryAt: null },
+          error: { message: GoogleAPI.getDriveErrorMessage(error) || 'Could not connect to Drive', status: error.status || error.result?.error?.code || null, retryAt: null },
         });
       } finally {
         setIsSyncing(false);

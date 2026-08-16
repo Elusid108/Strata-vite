@@ -33,20 +33,20 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
 
   return (
     <div
-      className={`absolute z-40 w-72 max-h-80 overflow-hidden flex flex-col rounded-lg border bg-white dark:bg-gray-800 shadow-lg ${
+      className={`absolute z-40 max-h-80 overflow-hidden flex flex-col rounded-lg border bg-white dark:bg-gray-800 shadow-lg min-w-0 ${
         isError ? 'border-amber-400 dark:border-amber-600' : 'border-gray-200 dark:border-gray-700'
-      } ${condensed ? 'bottom-12 left-full ml-1' : 'bottom-full right-0 mb-1'}`}
+      } ${condensed ? 'bottom-12 left-full ml-1 w-56' : 'left-0 right-0 bottom-full mb-1 w-auto'}`}
       role="dialog"
       aria-label="Sync status"
     >
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-        <div className="min-w-0">
-          <div className={`text-xs font-semibold ${isError ? 'text-amber-600 dark:text-amber-400' : 'text-gray-700 dark:text-gray-200'}`}>
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700 min-w-0">
+        <div className="min-w-0 flex-1">
+          <div className={`text-xs font-semibold truncate ${isError ? 'text-amber-600 dark:text-amber-400' : 'text-gray-700 dark:text-gray-200'}`}>
             {phaseTitle(phase)}
             {progress ? ` ${progress}` : ''}
           </div>
         </div>
-        <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700" title="Close">
+        <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0" title="Close">
           <X size={12} />
         </button>
       </div>
@@ -60,10 +60,12 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
         </div>
       </div>
 
-      <div className="px-3 py-2 text-xs border-b border-gray-100 dark:border-gray-700">
+      <div className="px-3 py-2 text-xs border-b border-gray-100 dark:border-gray-700 min-w-0">
         {phase === 'connecting' && <div className="text-gray-600 dark:text-gray-300">Connecting to Google Drive...</div>}
         {phase === 'waiting' && (
-          <div className="text-gray-600 dark:text-gray-300">Waiting for parent folder. {currentLabel}</div>
+          <div className="text-gray-600 dark:text-gray-300 truncate" title={`Waiting for parent folder. ${currentLabel}`}>
+            Waiting for parent folder. {currentLabel}
+          </div>
         )}
         {(phase === 'syncing' || phase === 'retrying') && syncStatus?.currentOp && (
           <div className="text-gray-800 dark:text-gray-100 font-medium truncate" title={currentLabel}>
@@ -77,7 +79,7 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
 
       {syncStatus?.error && (
         <div className="px-3 py-2 text-xs bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border-b border-amber-100 dark:border-amber-900">
-          <div className="flex items-start gap-1.5">
+          <div className="flex items-start gap-1.5 min-w-0">
             <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
             <div className="min-w-0">
               <div className="font-medium">Sync error{syncStatus.error.status ? ` (${syncStatus.error.status})` : ''}</div>
@@ -93,9 +95,9 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
       )}
 
       {upcoming.length > 0 && (
-        <div className="flex-1 overflow-y-auto px-3 py-2">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 min-w-0">
           <div className="text-[10px] font-semibold uppercase text-gray-400 mb-1">Up next ({remaining - 1} left)</div>
-          <ul className="space-y-1">
+          <ul className="space-y-1 min-w-0">
             {upcoming.map((op) => (
               <li key={op.id} className="text-xs text-gray-600 dark:text-gray-300 truncate" title={describeSyncOp(op, data)}>
                 {describeSyncOp(op, data)}
@@ -108,7 +110,7 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
         </div>
       )}
 
-      <div className="px-3 py-2 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700">
+      <div className="px-3 py-2 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 truncate">
         Last synced: {formatLastSyncTime(syncStatus?.lastSyncTime)}
       </div>
     </div>

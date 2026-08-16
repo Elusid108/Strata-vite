@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from 'react';
 import { APP_VERSION } from '../../lib/constants';
 import { getPickerPosition } from '../../lib/utils';
 import { Book, Plus, Settings, Star, X, GoogleG, ChevronRight, Minimize2, Maximize2 } from '../../components/icons';
 import { useStrata } from '../../contexts/StrataContext';
 import { useAppActions } from '../../hooks/useAppActions';
+import { SyncStatusPanel, syncFooterLabel } from './SyncStatusPanel';
 
 export function Sidebar() {
   const {
@@ -17,7 +19,7 @@ export function Sidebar() {
     showNotification,
     setShowSignOutConfirm,
     handleSignIn,
-    isSyncing,
+    syncStatus,
     favoritesExpanded,
     setFavoritesExpanded,
     setActiveNotebookId,
@@ -50,6 +52,23 @@ export function Sidebar() {
   } = useAppActions();
 
   const starredPages = getStarredPages();
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
+  const syncPanelRef = useRef(null);
+  const syncPhase = syncStatus?.phase || 'idle';
+  const syncLabel = syncFooterLabel(syncStatus);
+  const syncBusy = syncPhase === 'syncing' || syncPhase === 'connecting' || syncPhase === 'waiting';
+  const syncRetrying = syncPhase === 'retrying';
+
+  useEffect(() => {
+    if (!showSyncPanel) return undefined;
+    const onDown = (e) => {
+      if (syncPanelRef.current && !syncPanelRef.current.contains(e.target)) {
+        setShowSyncPanel(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [showSyncPanel]);
 
   const handleFavoriteClick = (page) => {
     flushAndClearSync();
@@ -79,7 +98,7 @@ export function Sidebar() {
   };
 
   return (
-    <div className={`${settings.condensedView ? 'w-16' : 'w-56'} bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-200`}>
+    <div className={`${settings.condensedView ? 'w-16' : 'w-56'} bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-200 relative`}>
       <div className={`p-3 border-b border-gray-200 dark:border-gray-700 flex items-center ${settings.condensedView ? 'justify-center' : 'justify-between'}`}>
         {!settings.condensedView && (
           <div className="flex items-center gap-2">
@@ -115,7 +134,8 @@ export function Sidebar() {
                 <div className="text-xs text-gray-500 truncate">{userEmail}</div>
               </div>
             )}
-            {isSyncing && <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />}
+            {syncBusy && <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />}
+            {syncRetrying && <div className="w-2 h-2 bg-amber-500 rounded-full" />}
           </div>
         ) : (
           <button
@@ -247,7 +267,15 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="p-2 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div ref={syncPanelRef} className="p-2 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between relative">
+        {showSyncPanel && isAuthenticated && (
+          <SyncStatusPanel
+            syncStatus={syncStatus}
+            data={data}
+            condensed={settings.condensedView}
+            onClose={() => setShowSyncPanel(false)}
+          />
+        )}
         <button
           onClick={() => setSettings((s) => ({ ...s, condensedView: !s.condensedView }))}
           className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded transition-colors"
@@ -255,10 +283,29 @@ export function Sidebar() {
         >
           {settings.condensedView ? <Maximize2 size={18} /> : <Minimize2 size={18} />}
         </button>
-        {!settings.condensedView && (
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            {isSyncing && <span className="text-blue-400 animate-pulse">Syncing...</span>}
-          </div>
+        {isAuthenticated && (
+          <button
+            type="button"
+            onClick={() => setShowSyncPanel((open) => !open)}
+            className={`text-xs rounded px-1.5 py-1 hover:bg-gray-200 dark:hover:bg-gray-700 ${
+              syncRetrying
+                ? 'text-amber-600 dark:text-amber-400'
+                : syncBusy
+                  ? 'text-blue-500 dark:text-blue-400 animate-pulse'
+                  : 'text-gray-400'
+            }`}
+            title={syncLabel}
+          >
+            {settings.condensedView ? (
+              <span
+                className={`block w-2 h-2 rounded-full ${
+                  syncRetrying ? 'bg-amber-500' : syncBusy ? 'bg-blue-500 animate-pulse' : 'bg-emerald-500'
+                }`}
+              />
+            ) : (
+              <span className="truncate max-w-[8.5rem] inline-block">{syncLabel}</span>
+            )}
+          </button>
         )}
       </div>
     </div>

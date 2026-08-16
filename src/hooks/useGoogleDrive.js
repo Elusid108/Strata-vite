@@ -11,6 +11,7 @@ import {
   clearSyncState,
   SyncNotReadyError,
   getLiveTree,
+  getSyncState,
 } from '../lib/sync-outbox';
 import { processSyncOp } from '../lib/sync-engine';
 
@@ -28,11 +29,21 @@ export function useGoogleDrive(data, setData, showNotification) {
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [hasInitialLoadCompleted, setHasInitialLoadCompleted] = useState(false);
   const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(() => hasPendingOps());
+  const [syncStatus, setSyncStatus] = useState({
+    phase: 'idle',
+    currentOp: null,
+    completed: 0,
+    remaining: 0,
+    queue: [],
+    error: null,
+    lastSyncTime: null,
+  });
 
   const workerLockRef = useRef(false);
   const backoffRef = useRef(1000);
   const workerTimerRef = useRef(null);
   const pendingKickRef = useRef(false);
+  const completedRef = useRef(0);
 
   const dataRef = useRef(data);
   useEffect(() => {
@@ -60,32 +71,56 @@ export function useGoogleDrive(data, setData, showNotification) {
     setHasUnsyncedChanges(hasPendingOps());
   }, []);
 
+  const publishSyncStatus = useCallback((partial = {}) => {
+    const ops = getSyncState().ops;
+    setSyncStatus((prev) => ({
+      ...prev,
+      ...partial,
+      remaining: ops.length,
+      currentOp: ops[0] || null,
+      queue: ops.slice(0, 20),
+    }));
+  }, []);
+
   const runWorker = useCallback(async () => {
     if (workerLockRef.current) return;
     if (!isAuthenticated || isLoadingAuth || !rootFolderRef.current || !hasInitialLoadCompleted) return;
 
     workerLockRef.current = true;
     setIsSyncing(true);
+    completedRef.current = 0;
+    publishSyncStatus({ phase: 'syncing', completed: 0, error: null });
     let retrying = false;
     try {
       while (true) {
         const op = peekOp();
         if (!op) {
           backoffRef.current = 1000;
+          const syncedAt = Date.now();
           localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current?.notebooks || []));
-          setLastSyncTime(Date.now());
+          setLastSyncTime(syncedAt);
+          publishSyncStatus({
+            phase: 'idle',
+            completed: completedRef.current,
+            error: null,
+            lastSyncTime: syncedAt,
+          });
           break;
         }
+        publishSyncStatus({ phase: 'syncing', completed: completedRef.current, error: null });
         try {
           await processSyncOp(op, {
             dataRef,
             setDataAndRef,
             rootFolderId: rootFolderRef.current,
           });
+          completedRef.current += 1;
           backoffRef.current = 1000;
+          publishSyncStatus({ phase: 'syncing', completed: completedRef.current, error: null });
         } catch (error) {
           if (error instanceof SyncNotReadyError || error?.code === 'NOT_READY') {
             log('SYNC', 'op not ready, retrying', { type: op.type, message: error.message });
+            publishSyncStatus({ phase: 'waiting', completed: completedRef.current });
             await new Promise((r) => setTimeout(r, 500));
             continue;
           }
@@ -93,6 +128,15 @@ export function useGoogleDrive(data, setData, showNotification) {
           const delay = backoffRef.current;
           backoffRef.current = Math.min(backoffRef.current * 2, 30000);
           retrying = true;
+          publishSyncStatus({
+            phase: 'retrying',
+            completed: completedRef.current,
+            error: {
+              message: error.message || 'Drive request failed',
+              status: error.status || error.result?.error?.code || null,
+              retryAt: Date.now() + delay,
+            },
+          });
           workerTimerRef.current = setTimeout(() => {
             workerLockRef.current = false;
             runWorker();
@@ -111,7 +155,7 @@ export function useGoogleDrive(data, setData, showNotification) {
         }
       }
     }
-  }, [isAuthenticated, isLoadingAuth, hasInitialLoadCompleted, setDataAndRef, refreshUnsynced]);
+  }, [isAuthenticated, isLoadingAuth, hasInitialLoadCompleted, setDataAndRef, refreshUnsynced, publishSyncStatus]);
 
   const kickWorker = useCallback(() => {
     refreshUnsynced();
@@ -209,18 +253,25 @@ export function useGoogleDrive(data, setData, showNotification) {
     const initDriveSync = async () => {
       try {
         setIsSyncing(true);
+        publishSyncStatus({ phase: 'connecting', error: null });
         const rootFolderId = await GoogleAPI.getOrCreateRootFolder();
         setDriveRootFolderId(rootFolderId);
-        setLastSyncTime(Date.now());
+        const syncedAt = Date.now();
+        setLastSyncTime(syncedAt);
+        publishSyncStatus({ phase: 'idle', lastSyncTime: syncedAt });
       } catch (error) {
         log('ERROR', 'Error initializing Drive sync:', error);
+        publishSyncStatus({
+          phase: 'idle',
+          error: { message: error.message || 'Could not connect to Drive', status: error.status || null, retryAt: null },
+        });
       } finally {
         setIsSyncing(false);
       }
     };
 
     initDriveSync();
-  }, [isAuthenticated, isLoadingAuth]);
+  }, [isAuthenticated, isLoadingAuth, publishSyncStatus]);
 
   const enqueueStructureFromTree = useCallback((tree) => {
     const notebooks = tree?.notebooks || [];
@@ -455,6 +506,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     isSyncing,
     lastSyncTime,
     hasUnsyncedChanges,
+    syncStatus,
     hasInitialLoadCompleted,
     markInitialLoadComplete,
     handleSignIn,

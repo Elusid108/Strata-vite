@@ -18,7 +18,7 @@
 // Handles authentication, Drive API operations, and Picker integration
 
 import { CLIENT_ID, API_KEY, SCOPES } from './config';
-import { DEBUG_SYNC } from './constants';
+import { DEBUG_SYNC, APP_VERSION } from './constants';
 
 /**
  * @typedef {Object} StrataNode
@@ -2968,7 +2968,7 @@ const updateManifest = async (data, rootFolderId, appVersion) => {
         await ensureAuthenticated();
         
         const manifest = {
-            version: appVersion || '3.4.5',
+            version: appVersion || APP_VERSION,
             exportedAt: new Date().toISOString(),
             notebooks: data.notebooks.map(nb => ({
                 id: nb.id,

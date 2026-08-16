@@ -20,8 +20,12 @@ export function useAppActions() {
     data,
     setData,
     saveToHistory,
-    triggerStructureSync,
     triggerContentSync,
+    syncSubtree,
+    syncFolderMeta,
+    syncPageFile,
+    persistTree,
+    syncIndex,
     queueDriveDelete,
     moveItemInDrive,
     showNotification,
@@ -167,8 +171,8 @@ export function useAppActions() {
     setEditingNotebookId(newNb.id);
     setCreationFlow({ notebookId: newNb.id, tabId: newTab.id, pageId: newPage.id });
     showNotification('Notebook created', 'success');
-    triggerStructureSync();
-  }, [saveToHistory, data, setData, showNotification, triggerStructureSync, setActiveNotebookId, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setCreationFlow]);
+    syncSubtree(newData, { notebookId: newNb.id, tabId: newTab.id, pageId: newPage.id });
+  }, [saveToHistory, data, setData, showNotification, syncSubtree, setActiveNotebookId, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setCreationFlow]);
 
   const addTab = useCallback(async () => {
     if (!activeNotebookId) return;
@@ -187,8 +191,8 @@ export function useAppActions() {
     setEditingTabId(newTab.id);
     setEditingNotebookId(null);
     showNotification('Section created', 'success');
-    triggerStructureSync();
-  }, [activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId]);
+    syncSubtree(newData, { notebookId: activeNotebookId, tabId: newTab.id, pageId: newPage.id });
+  }, [activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId]);
 
   const addPage = useCallback(async () => {
     if (!activeTabId) return;
@@ -212,9 +216,8 @@ export function useAppActions() {
     setEditingNotebookId(null);
     setShouldFocusTitle(true);
     showNotification('Page created', 'success');
-    triggerStructureSync();
-    triggerContentSync(newPage.id);
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setShouldFocusTitle]);
+    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setShouldFocusTitle]);
 
   const addCanvasPage = useCallback(() => {
     if (!activeTabId) return;
@@ -229,9 +232,8 @@ export function useAppActions() {
     setData(newData);
     setActivePageId(newPage.id);
     showNotification('Canvas page created', 'success');
-    triggerStructureSync();
-    triggerContentSync(newPage.id);
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]);
+    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]);
 
   const addDatabasePage = useCallback(() => {
     if (!activeTabId) return;
@@ -246,9 +248,8 @@ export function useAppActions() {
     setData(newData);
     setActivePageId(newPage.id);
     showNotification('Database page created', 'success');
-    triggerStructureSync();
-    triggerContentSync(newPage.id);
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]);
+    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]);
 
   const addCodePage = useCallback(() => {
     if (!activeTabId) return;
@@ -263,9 +264,8 @@ export function useAppActions() {
     setData(newData);
     setActivePageId(newPage.id);
     showNotification('Code page created', 'success');
-    triggerStructureSync();
-    triggerContentSync(newPage.id);
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]);
+    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]);
 
   const addEmbedPageFromUrl = useCallback(
     (rawUrl) => {
@@ -300,11 +300,10 @@ export function useAppActions() {
       setData(newData);
       setActivePageId(newPage.id);
       showNotification(`${pageName} added`, 'success');
-      triggerStructureSync();
-      triggerContentSync(newPage.id);
+      syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
       return true;
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
+    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]
   );
 
   const addGooglePage = useCallback(
@@ -390,10 +389,9 @@ export function useAppActions() {
       setData(newData);
       setActivePageId(newPage.id);
       showNotification(`${file.name || 'Google ' + typeName} added`, 'success');
-      triggerStructureSync();
-      triggerContentSync(newPage.id);
+      syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, triggerStructureSync, triggerContentSync, setActivePageId]
+    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]
   );
 
   const executeDelete = useCallback(
@@ -493,13 +491,13 @@ export function useAppActions() {
         }
       }
 
-      if (driveIdsToDelete.length > 0) queueDriveDelete(driveIdsToDelete);
+      if (driveIdsToDelete.length > 0) queueDriveDelete(driveIdsToDelete, newData);
       setData(newData);
       if (itemToDelete?.id === id) setItemToDelete(null);
       if (activeTabMenu?.id === id) setActiveTabMenu(null);
       if (selectedBlockId === id) setSelectedBlockId(null);
       showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted`, 'success');
-      triggerStructureSync();
+      if (driveIdsToDelete.length === 0) syncIndex(newData);
     },
     [
       saveToHistory,
@@ -511,7 +509,7 @@ export function useAppActions() {
       selectTab,
       selectPage,
       showNotification,
-      triggerStructureSync,
+      syncIndex,
       queueDriveDelete,
       itemToDelete,
       activeTabMenu,
@@ -651,14 +649,14 @@ export function useAppActions() {
 
       if (changed) {
         setData(newData);
-        triggerStructureSync();
-        // Physically move the underlying file so it doesn't revert on reload
         if (driveMoveTask && moveItemInDrive) {
-          moveItemInDrive(driveMoveTask.itemId, driveMoveTask.newParentId, driveMoveTask.oldParentId);
+          moveItemInDrive(driveMoveTask.itemId, driveMoveTask.newParentId, driveMoveTask.oldParentId, newData);
+        } else {
+          syncIndex(newData);
         }
       }
     },
-    [saveToHistory, data, setData, activeNotebookId, activeTabId, triggerStructureSync, moveItemInDrive, setDragHoverTarget, dragHoverTimerRef]
+    [saveToHistory, data, setData, activeNotebookId, activeTabId, syncIndex, moveItemInDrive, setDragHoverTarget, dragHoverTimerRef]
   );
 
   const handleFavoriteDrop = useCallback(
@@ -669,61 +667,61 @@ export function useAppActions() {
       if (!dragDataRaw) return;
       const dragData = JSON.parse(dragDataRaw);
       if (dragData.type !== 'favorite' || dragData.id === targetPageId) return;
-      setData((prev) => {
-        const next = { ...prev };
-        if (!next.favoritesOrder) {
-          const currentStars = [];
-          next.notebooks.forEach((nb) => nb.tabs.forEach((t) => t.pages.forEach((p) => { if (p.starred) currentStars.push(p.id); })));
-          next.favoritesOrder = currentStars;
-        }
-        const order = [...next.favoritesOrder];
-        const fromIdx = order.indexOf(dragData.id);
-        const toIdx = order.indexOf(targetPageId);
-        if (fromIdx > -1 && toIdx > -1) {
-          order.splice(fromIdx, 1);
-          order.splice(toIdx, 0, dragData.id);
-          next.favoritesOrder = order;
-        }
-        return next;
-      });
-      triggerStructureSync();
+      const next = { ...data };
+      if (!next.favoritesOrder) {
+        const currentStars = [];
+        next.notebooks.forEach((nb) => nb.tabs.forEach((t) => t.pages.forEach((p) => { if (p.starred) currentStars.push(p.id); })));
+        next.favoritesOrder = currentStars;
+      }
+      const order = [...next.favoritesOrder];
+      const fromIdx = order.indexOf(dragData.id);
+      const toIdx = order.indexOf(targetPageId);
+      if (fromIdx > -1 && toIdx > -1) {
+        order.splice(fromIdx, 1);
+        order.splice(toIdx, 0, dragData.id);
+        next.favoritesOrder = order;
+        setData(next);
+        persistTree(next);
+      }
     },
-    [setData, triggerStructureSync]
+    [data, setData, persistTree]
   );
 
   const updateNotebookIcon = useCallback(
     (notebookId, icon) => {
-      setData((prev) => ({
-        ...prev,
-        notebooks: prev.notebooks.map((nb) => (nb.id === notebookId ? { ...nb, icon } : nb)),
-      }));
+      const next = {
+        ...data,
+        notebooks: data.notebooks.map((nb) => (nb.id === notebookId ? { ...nb, icon } : nb)),
+      };
+      setData(next);
       setNotebookIconPicker(null);
       setIconSearchTerm('');
-      triggerStructureSync();
+      syncFolderMeta(next, { entityType: 'notebook', appId: notebookId });
     },
-    [setData, triggerStructureSync, setNotebookIconPicker, setIconSearchTerm]
+    [data, setData, syncFolderMeta, setNotebookIconPicker, setIconSearchTerm]
   );
 
   const updateTabIcon = useCallback(
     (tabId, icon) => {
-      setData((prev) => ({
-        ...prev,
-        notebooks: prev.notebooks.map((nb) =>
+      const next = {
+        ...data,
+        notebooks: data.notebooks.map((nb) =>
           nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id === tabId ? { ...tab, icon } : tab)) }
         ),
-      }));
+      };
+      setData(next);
       setTabIconPicker(null);
       setIconSearchTerm('');
-      triggerStructureSync();
+      syncFolderMeta(next, { entityType: 'tab', appId: tabId, notebookId: activeNotebookId });
     },
-    [setData, activeNotebookId, triggerStructureSync, setTabIconPicker, setIconSearchTerm]
+    [data, setData, activeNotebookId, syncFolderMeta, setTabIconPicker, setIconSearchTerm]
   );
 
   const updatePageIcon = useCallback(
     (pageId, icon) => {
-      setData((prev) => ({
-        ...prev,
-        notebooks: prev.notebooks.map((nb) =>
+      const next = {
+        ...data,
+        notebooks: data.notebooks.map((nb) =>
           nb.id !== activeNotebookId
             ? nb
             : {
@@ -733,74 +731,76 @@ export function useAppActions() {
                 ),
               }
         ),
-      }));
+      };
+      setData(next);
       setPageIconPicker(null);
       setIconSearchTerm('');
-      triggerStructureSync();
+      syncPageFile(next, pageId);
     },
-    [setData, activeNotebookId, activeTabId, triggerStructureSync, setPageIconPicker, setIconSearchTerm]
+    [data, setData, activeNotebookId, activeTabId, syncPageFile, setPageIconPicker, setIconSearchTerm]
   );
 
   const handleCanvasUpdate = useCallback(
     (updates) => {
       if (!activePageId || !activeTabId || !activeNotebookId) return;
-      setData((prev) => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updates })));
-      triggerContentSync(activePageId);
+      const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updates }));
+      setData(next);
+      triggerContentSync(activePageId, next);
     },
-    [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]
+    [activePageId, activeTabId, activeNotebookId, data, setData, triggerContentSync]
   );
 
   const handleTableUpdate = useCallback(
     (updatedPage) => {
       if (!activePageId || !activeTabId || !activeNotebookId) return;
-      setData((prev) => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updatedPage })));
-      triggerContentSync(activePageId);
+      const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updatedPage }));
+      setData(next);
+      triggerContentSync(activePageId, next);
     },
-    [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]
+    [activePageId, activeTabId, activeNotebookId, data, setData, triggerContentSync]
   );
 
   const handleMermaidUpdate = useCallback(
     (updates) => {
       if (!activePageId || !activeTabId || !activeNotebookId) return;
-      setData((prev) => updatePageInData(prev, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updates })));
-      triggerContentSync(activePageId);
+      const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updates }));
+      setData(next);
+      triggerContentSync(activePageId, next);
     },
-    [activePageId, activeTabId, activeNotebookId, setData, triggerContentSync]
+    [activePageId, activeTabId, activeNotebookId, data, setData, triggerContentSync]
   );
 
   const updateTabColor = useCallback(
     (tabId, color) => {
-      setData((prev) => ({
-        ...prev,
-        notebooks: prev.notebooks.map((nb) =>
+      const next = {
+        ...data,
+        notebooks: data.notebooks.map((nb) =>
           nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== tabId ? tab : { ...tab, color })) }
         ),
-      }));
+      };
+      setData(next);
       setActiveTabMenu(null);
-      triggerStructureSync();
+      syncFolderMeta(next, { entityType: 'tab', appId: tabId, notebookId: activeNotebookId });
     },
-    [setData, activeNotebookId, triggerStructureSync, setActiveTabMenu]
+    [data, setData, activeNotebookId, syncFolderMeta, setActiveTabMenu]
   );
 
   const toggleStar = useCallback(
     (pageId, notebookId, tabId) => {
-      setData((prev) => {
-        const next = {
-          ...prev,
-          notebooks: prev.notebooks.map((nb) =>
-            nb.id !== notebookId ? nb : { ...nb, tabs: nb.tabs.map((t) => (t.id !== tabId ? t : { ...t, pages: t.pages.map((p) => (p.id === pageId ? { ...p, starred: !p.starred } : p)) })) }
-          ),
-        };
-        if (!next.favoritesOrder) next.favoritesOrder = [];
-        const isNowStarred = next.notebooks.find((n) => n.id === notebookId)?.tabs.find((t) => t.id === tabId)?.pages.find((p) => p.id === pageId)?.starred;
-        if (isNowStarred && !next.favoritesOrder.includes(pageId)) next.favoritesOrder = [...next.favoritesOrder, pageId];
-        else if (!isNowStarred) next.favoritesOrder = next.favoritesOrder.filter((id) => id !== pageId);
-        return next;
-      });
-      triggerStructureSync();
-      triggerContentSync(pageId);
+      const next = {
+        ...data,
+        notebooks: data.notebooks.map((nb) =>
+          nb.id !== notebookId ? nb : { ...nb, tabs: nb.tabs.map((t) => (t.id !== tabId ? t : { ...t, pages: t.pages.map((p) => (p.id === pageId ? { ...p, starred: !p.starred } : p)) })) }
+        ),
+      };
+      if (!next.favoritesOrder) next.favoritesOrder = [];
+      const isNowStarred = next.notebooks.find((n) => n.id === notebookId)?.tabs.find((t) => t.id === tabId)?.pages.find((p) => p.id === pageId)?.starred;
+      if (isNowStarred && !next.favoritesOrder.includes(pageId)) next.favoritesOrder = [...next.favoritesOrder, pageId];
+      else if (!isNowStarred) next.favoritesOrder = next.favoritesOrder.filter((id) => id !== pageId);
+      setData(next);
+      triggerContentSync(pageId, next);
     },
-    [setData, triggerStructureSync, triggerContentSync]
+    [data, setData, triggerContentSync]
   );
 
   return {

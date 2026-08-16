@@ -252,7 +252,8 @@ async function processPatchPage(op, ctx) {
   const link = isLinkPage(page);
   if (link) {
     if (!page.driveLinkFileId) {
-      throw new SyncNotReadyError(`Link file not ready for page ${page.id}`);
+      await processEnsurePageFile(op, ctx);
+      return;
     }
     const result = await GoogleAPI.writeLinkJson(page, tab.driveFolderId);
     applyPageMeta(ctx.setDataAndRef, notebook.id, tab.id, page.id, { driveEtag: result.etag });
@@ -260,7 +261,8 @@ async function processPatchPage(op, ctx) {
     return;
   }
   if (!page.driveFileId) {
-    throw new SyncNotReadyError(`Page file not ready for ${page.id}`);
+    await processEnsurePageFile(op, ctx);
+    return;
   }
   const result = await GoogleAPI.writePageJson(page, tab.driveFolderId);
   applyPageMeta(ctx.setDataAndRef, notebook.id, tab.id, page.id, { driveEtag: result.etag });

@@ -14,6 +14,51 @@ import {
   getSyncState,
 } from '../lib/sync-outbox';
 import { processSyncOp } from '../lib/sync-engine';
+import { findPageContext, isLinkPage } from '../lib/sync-merge';
+
+function pageHasStrataFile(page) {
+  if (!page) return false;
+  if (isLinkPage(page)) return !!page.driveLinkFileId;
+  return !!page.driveFileId;
+}
+
+function enqueueMissingParent(op, data) {
+  if (!op || !data) return;
+  if (op.type === 'ensureFolder' && op.entityType === 'tab' && op.notebookId) {
+    const notebook = (data.notebooks || []).find((nb) => nb.id === op.notebookId);
+    if (notebook && !notebook.driveFolderId) {
+      enqueueOp(
+        { type: 'ensureFolder', entityType: 'notebook', appId: notebook.id },
+        `folder:${notebook.id}`
+      );
+    }
+    return;
+  }
+  if (op.type !== 'ensurePageFile' && op.type !== 'patchPage') return;
+  const found = findPageContext(data, op.pageId);
+  if (!found) return;
+  const { notebook, tab, page } = found;
+  if (!notebook.driveFolderId) {
+    enqueueOp(
+      { type: 'ensureFolder', entityType: 'notebook', appId: notebook.id },
+      `folder:${notebook.id}`
+    );
+    return;
+  }
+  if (!tab.driveFolderId) {
+    enqueueOp(
+      { type: 'ensureFolder', entityType: 'tab', appId: tab.id, notebookId: notebook.id },
+      `folder:${tab.id}`
+    );
+    return;
+  }
+  if (op.type === 'patchPage' && !pageHasStrataFile(page)) {
+    enqueueOp(
+      { type: 'ensurePageFile', pageId: page.id, tabId: tab.id, notebookId: notebook.id },
+      `page:${page.id}`
+    );
+  }
+}
 
 /**
  * Hook for managing Google Drive authentication and serial outbox sync
@@ -120,7 +165,12 @@ export function useGoogleDrive(data, setData, showNotification) {
         } catch (error) {
           if (error instanceof SyncNotReadyError || error?.code === 'NOT_READY') {
             log('SYNC', 'op not ready, retrying', { type: op.type, message: error.message });
-            publishSyncStatus({ phase: 'waiting', completed: completedRef.current });
+            enqueueMissingParent(op, dataRef.current);
+            publishSyncStatus({
+              phase: 'waiting',
+              completed: completedRef.current,
+              error: { message: error.message || 'Waiting for Drive…', status: null, retryAt: null },
+            });
             await new Promise((r) => setTimeout(r, 500));
             continue;
           }
@@ -264,19 +314,32 @@ export function useGoogleDrive(data, setData, showNotification) {
     initDriveSync();
   }, [isAuthenticated, isLoadingAuth, publishSyncStatus]);
 
+  const persistSnapshot = useCallback((tree) => {
+    const snapshot = tree || getLiveTree() || dataRef.current;
+    if (!snapshot) return null;
+    persistNotebookData(snapshot);
+    dataRef.current = snapshot;
+    return snapshot;
+  }, []);
+
   const enqueueStructureFromTree = useCallback((tree) => {
     const notebooks = tree?.notebooks || [];
     for (const notebook of notebooks) {
-      enqueueOp(
-        { type: 'ensureFolder', entityType: 'notebook', appId: notebook.id },
-        `folder:${notebook.id}`
-      );
-      for (const tab of notebook.tabs || []) {
+      if (!notebook.driveFolderId) {
         enqueueOp(
-          { type: 'ensureFolder', entityType: 'tab', appId: tab.id, notebookId: notebook.id },
-          `folder:${tab.id}`
+          { type: 'ensureFolder', entityType: 'notebook', appId: notebook.id },
+          `folder:${notebook.id}`
         );
+      }
+      for (const tab of notebook.tabs || []) {
+        if (!tab.driveFolderId) {
+          enqueueOp(
+            { type: 'ensureFolder', entityType: 'tab', appId: tab.id, notebookId: notebook.id },
+            `folder:${tab.id}`
+          );
+        }
         for (const page of tab.pages || []) {
+          if (pageHasStrataFile(page)) continue;
           enqueueOp(
             { type: 'ensurePageFile', pageId: page.id, tabId: tab.id, notebookId: notebook.id },
             `page:${page.id}`
@@ -299,44 +362,36 @@ export function useGoogleDrive(data, setData, showNotification) {
   }, [hasInitialLoadCompleted, isAuthenticated, driveRootFolderId, kickWorker, enqueueStructureFromTree]);
 
   const triggerStructureSync = useCallback((tree) => {
-    const snapshot = tree || getLiveTree() || dataRef.current;
-    persistNotebookData(snapshot);
-    dataRef.current = snapshot;
+    const snapshot = persistSnapshot(tree);
     enqueueStructureFromTree(snapshot);
     kickWorker();
-  }, [enqueueStructureFromTree, kickWorker]);
+  }, [persistSnapshot, enqueueStructureFromTree, kickWorker]);
 
   const triggerContentSync = useCallback(
-    (pageId) => {
-      const snapshot = getLiveTree() || dataRef.current;
-      persistNotebookData(snapshot);
-      dataRef.current = snapshot;
+    (pageId, tree) => {
+      persistSnapshot(tree);
       if (pageId) {
         enqueueOp({ type: 'patchPage', pageId }, `patch:${pageId}`);
       }
       kickWorker();
     },
-    [kickWorker]
+    [persistSnapshot, kickWorker]
   );
 
   const queueDriveDelete = useCallback(
-    (driveIds) => {
-      const snapshot = getLiveTree() || dataRef.current;
-      persistNotebookData(snapshot);
-      dataRef.current = snapshot;
+    (driveIds, tree) => {
+      persistSnapshot(tree);
       enqueueTrash(driveIds);
       enqueueOp({ type: 'saveIndex' }, 'saveIndex');
       kickWorker();
     },
-    [kickWorker]
+    [persistSnapshot, kickWorker]
   );
 
   const moveItemInDrive = useCallback(
-    async (itemId, newParentId, oldParentId) => {
+    (itemId, newParentId, oldParentId, tree) => {
       if (!itemId || !newParentId || !oldParentId) return;
-      const snapshot = getLiveTree() || dataRef.current;
-      persistNotebookData(snapshot);
-      dataRef.current = snapshot;
+      persistSnapshot(tree);
       enqueueOp(
         { type: 'move', driveId: itemId, newParentId, oldParentId },
         `move:${itemId}`
@@ -344,7 +399,85 @@ export function useGoogleDrive(data, setData, showNotification) {
       enqueueOp({ type: 'saveIndex' }, 'saveIndex');
       kickWorker();
     },
-    [kickWorker]
+    [persistSnapshot, kickWorker]
+  );
+
+  const syncSubtree = useCallback(
+    (tree, { notebookId, tabId, pageId } = {}) => {
+      const snapshot = persistSnapshot(tree);
+      const notebook = (snapshot?.notebooks || []).find((nb) => nb.id === notebookId);
+      if (notebook && !notebook.driveFolderId) {
+        enqueueOp(
+          { type: 'ensureFolder', entityType: 'notebook', appId: notebook.id },
+          `folder:${notebook.id}`
+        );
+      }
+      const tab = notebook?.tabs?.find((t) => t.id === tabId);
+      if (tab && !tab.driveFolderId) {
+        enqueueOp(
+          { type: 'ensureFolder', entityType: 'tab', appId: tab.id, notebookId: notebook.id },
+          `folder:${tab.id}`
+        );
+      }
+      const page = tab?.pages?.find((p) => p.id === pageId);
+      if (page && !pageHasStrataFile(page)) {
+        enqueueOp(
+          { type: 'ensurePageFile', pageId: page.id, tabId: tab.id, notebookId: notebook.id },
+          `page:${page.id}`
+        );
+      }
+      enqueueOp({ type: 'saveIndex' }, 'saveIndex');
+      kickWorker();
+    },
+    [persistSnapshot, kickWorker]
+  );
+
+  const syncFolderMeta = useCallback(
+    (tree, { entityType, appId, notebookId } = {}) => {
+      persistSnapshot(tree);
+      if (!appId || !entityType) return;
+      enqueueOp(
+        { type: 'ensureFolder', entityType, appId, notebookId },
+        `folder:${appId}`
+      );
+      kickWorker();
+    },
+    [persistSnapshot, kickWorker]
+  );
+
+  const syncPageFile = useCallback(
+    (tree, pageId) => {
+      const snapshot = persistSnapshot(tree);
+      if (!pageId) return;
+      const found = findPageContext(snapshot, pageId);
+      enqueueOp(
+        {
+          type: 'ensurePageFile',
+          pageId,
+          tabId: found?.tab?.id,
+          notebookId: found?.notebook?.id,
+        },
+        `page:${pageId}`
+      );
+      kickWorker();
+    },
+    [persistSnapshot, kickWorker]
+  );
+
+  const persistTree = useCallback(
+    (tree) => {
+      persistSnapshot(tree);
+    },
+    [persistSnapshot]
+  );
+
+  const syncIndex = useCallback(
+    (tree) => {
+      persistSnapshot(tree);
+      enqueueOp({ type: 'saveIndex' }, 'saveIndex');
+      kickWorker();
+    },
+    [persistSnapshot, kickWorker]
   );
 
   const loadFromDrive = useCallback(async () => {
@@ -440,36 +573,37 @@ export function useGoogleDrive(data, setData, showNotification) {
             { type: 'rename', driveId: nb.driveFolderId, name: GoogleAPI.sanitizeFileName(nb.name) },
             `rename:${nb.driveFolderId}`
           );
-          triggerStructureSync();
+          enqueueOp({ type: 'saveIndex' }, 'saveIndex');
+          kickWorker();
           return;
         }
-        for (const tab of nb.tabs) {
+        for (const tab of nb.tabs || []) {
           if (type === 'tab' && tab.id === id && tab.driveFolderId) {
             enqueueOp(
               { type: 'rename', driveId: tab.driveFolderId, name: GoogleAPI.sanitizeFileName(tab.name) },
               `rename:${tab.driveFolderId}`
             );
-            triggerStructureSync();
+            enqueueOp({ type: 'saveIndex' }, 'saveIndex');
+            kickWorker();
             return;
           }
-          for (const pg of tab.pages) {
+          for (const pg of tab.pages || []) {
             if (pg.id === id) {
-              const fileId = pg.driveLinkFileId || pg.driveFileId;
+              const fileId = isLinkPage(pg) ? pg.driveLinkFileId : pg.driveFileId;
               if (fileId) {
                 enqueueOp(
                   { type: 'rename', driveId: fileId, name: GoogleAPI.sanitizeFileName(pg.name) + '.json' },
                   `rename:${fileId}`
                 );
               }
-              triggerContentSync(id);
-              triggerStructureSync();
+              triggerContentSync(id, currentData);
               return;
             }
           }
         }
       }
     },
-    [triggerStructureSync, triggerContentSync]
+    [kickWorker, triggerContentSync]
   );
 
   useEffect(() => {
@@ -511,6 +645,11 @@ export function useGoogleDrive(data, setData, showNotification) {
     loadFromDrive,
     triggerStructureSync,
     triggerContentSync,
+    syncSubtree,
+    syncFolderMeta,
+    syncPageFile,
+    persistTree,
+    syncIndex,
     syncRenameToDrive,
     queueDriveDelete,
     moveItemInDrive,

@@ -63,8 +63,8 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
       <div className="px-3 py-2 text-xs border-b border-gray-100 dark:border-gray-700 min-w-0">
         {phase === 'connecting' && <div className="text-gray-600 dark:text-gray-300">Connecting to Google Drive...</div>}
         {phase === 'waiting' && (
-          <div className="text-gray-600 dark:text-gray-300 truncate" title={`Waiting for parent folder. ${currentLabel}`}>
-            Waiting for parent folder. {currentLabel}
+          <div className="text-gray-600 dark:text-gray-300 truncate" title={syncStatus?.error?.message || `Waiting for Drive… ${currentLabel}`}>
+            Waiting for Drive… {currentLabel}
           </div>
         )}
         {(phase === 'syncing' || phase === 'retrying') && syncStatus?.currentOp && (

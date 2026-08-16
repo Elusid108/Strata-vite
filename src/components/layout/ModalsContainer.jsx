@@ -6,6 +6,7 @@ import {
   DRIVE_SERVICE_ICONS,
 } from '../../lib/constants';
 import { findBlockInRows, updatePageInData, COLOR_BG_CLASSES } from '../../lib/utils';
+import { collectDriveOnlyIds } from '../../lib/sync-merge';
 import * as GoogleAPI from '../../lib/google-api';
 import * as emoji from 'node-emoji';
 import {
@@ -40,6 +41,8 @@ export function ModalsContainer() {
     setActivePageId,
     setData,
     triggerStructureSync,
+    triggerContentSync,
+    queueDriveDelete,
     setActiveTabMenu,
     setItemToDelete,
     activeTabMenu,
@@ -77,7 +80,6 @@ export function ModalsContainer() {
     setMapConfigPosition,
     blockMenu,
     setBlockMenu,
-    triggerContentSync,
   } = useStrata();
 
   const { rowsForEditor } = usePageContent();
@@ -359,8 +361,10 @@ export function ModalsContainer() {
             <div className="flex flex-col gap-3">
               <button
                 onClick={() => {
+                  const extra = collectDriveOnlyIds(syncConflict.localData, syncConflict.driveData);
+                  if (extra.length) queueDriveDelete(extra);
                   setData(syncConflict.localData);
-                  triggerStructureSync();
+                  triggerStructureSync(syncConflict.localData);
                   setSyncConflict(null);
                 }}
                 className="w-full text-left p-4 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"

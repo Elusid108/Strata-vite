@@ -96,8 +96,9 @@ export function usePageContent() {
     }
     if (activePageId && activeTabId && activeNotebookId && activePageRows != null) {
       flushActivePageToData(activePageRows);
+      triggerContentSync(activePageId);
     }
-  }, [activePageId, activeTabId, activeNotebookId, activePageRows, flushActivePageToData]);
+  }, [activePageId, activeTabId, activeNotebookId, activePageRows, flushActivePageToData, triggerContentSync]);
 
   const updatePageContent = useCallback(
     (tree, shouldSaveHistory = false) => {

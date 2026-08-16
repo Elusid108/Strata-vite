@@ -1,62 +1,143 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { APP_VERSION } from '../lib/constants';
 import { log } from '../lib/logger';
 import * as GoogleAPI from '../lib/google-api';
-import { generateOfflineViewerHtml } from '../lib/offline-viewer';
 import { reconcileData } from '../lib/reconciler';
+import {
+  enqueueOp,
+  enqueueTrash,
+  peekOp,
+  hasPendingOps,
+  persistNotebookData,
+  clearSyncState,
+  SyncNotReadyError,
+  getLiveTree,
+} from '../lib/sync-outbox';
+import { processSyncOp } from '../lib/sync-engine';
 
 /**
- * Hook for managing Google Drive authentication and sync
- * @param {Object} data - The notebook data
- * @param {Function} setData - Function to update notebook data
- * @param {Function} showNotification - Function to show notifications
- * @returns {Object} Auth state and sync functions
+ * Hook for managing Google Drive authentication and serial outbox sync
  */
 export function useGoogleDrive(data, setData, showNotification) {
-  // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [userEmail, setUserEmail] = useState(null);
   const [userName, setUserName] = useState(null);
-  
-  // Drive sync state
+
   const [driveRootFolderId, setDriveRootFolderId] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
-  
-  // Structure version for triggering sync
-  const [structureVersion, setStructureVersion] = useState(0);
-  
-  // Content sync version for triggering content sync retries
-  const [contentSyncVersion, setContentSyncVersion] = useState(0);
-  
   const [hasInitialLoadCompleted, setHasInitialLoadCompleted] = useState(false);
-  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
-  
-  // Sync lock refs
-  const syncLockRef = useRef(false);
-  const pendingSyncRef = useRef(false);
-  const lastContentSyncRef = useRef(Date.now());
-  
-  // Pending Drive deletes queue
-  const pendingDriveDeletesRef = useRef([]);
-  
-  // Pending content sync flag
-  const pendingContentSyncRef = useRef(false);
-  
-  const dirtyPagesRef = useRef(new Set());
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(() => hasPendingOps());
 
-  // Ref for structure sync to read current data without triggering effect on every data change
+  const workerLockRef = useRef(false);
+  const backoffRef = useRef(1000);
+  const workerTimerRef = useRef(null);
+  const pendingKickRef = useRef(false);
+
   const dataRef = useRef(data);
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
 
+  const rootFolderRef = useRef(driveRootFolderId);
+  useEffect(() => {
+    rootFolderRef.current = driveRootFolderId;
+  }, [driveRootFolderId]);
+
+  const setDataAndRef = useCallback(
+    (updater) => {
+      setData((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        dataRef.current = next;
+        persistNotebookData(next);
+        return next;
+      });
+    },
+    [setData]
+  );
+
+  const refreshUnsynced = useCallback(() => {
+    setHasUnsyncedChanges(hasPendingOps());
+  }, []);
+
+  const runWorker = useCallback(async () => {
+    if (workerLockRef.current) return;
+    if (!isAuthenticated || isLoadingAuth || !rootFolderRef.current || !hasInitialLoadCompleted) return;
+
+    workerLockRef.current = true;
+    setIsSyncing(true);
+    let retrying = false;
+    try {
+      while (true) {
+        const op = peekOp();
+        if (!op) {
+          backoffRef.current = 1000;
+          localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current?.notebooks || []));
+          setLastSyncTime(Date.now());
+          break;
+        }
+        try {
+          await processSyncOp(op, {
+            dataRef,
+            setDataAndRef,
+            rootFolderId: rootFolderRef.current,
+          });
+          backoffRef.current = 1000;
+        } catch (error) {
+          if (error instanceof SyncNotReadyError || error?.code === 'NOT_READY') {
+            log('SYNC', 'op not ready, retrying', { type: op.type, message: error.message });
+            await new Promise((r) => setTimeout(r, 500));
+            continue;
+          }
+          log('ERROR', 'sync op failed', error);
+          const delay = backoffRef.current;
+          backoffRef.current = Math.min(backoffRef.current * 2, 30000);
+          retrying = true;
+          workerTimerRef.current = setTimeout(() => {
+            workerLockRef.current = false;
+            runWorker();
+          }, delay);
+          return;
+        }
+      }
+    } finally {
+      if (!retrying) {
+        workerLockRef.current = false;
+        setIsSyncing(false);
+        refreshUnsynced();
+        if (pendingKickRef.current) {
+          pendingKickRef.current = false;
+          runWorker();
+        }
+      }
+    }
+  }, [isAuthenticated, isLoadingAuth, hasInitialLoadCompleted, setDataAndRef, refreshUnsynced]);
+
+  const kickWorker = useCallback(() => {
+    refreshUnsynced();
+    if (workerLockRef.current) {
+      pendingKickRef.current = true;
+      return;
+    }
+    if (workerTimerRef.current) {
+      clearTimeout(workerTimerRef.current);
+      workerTimerRef.current = null;
+    }
+    workerTimerRef.current = setTimeout(() => {
+      runWorker();
+    }, 50);
+  }, [runWorker, refreshUnsynced]);
+
+  useEffect(() => {
+    return () => {
+      if (workerTimerRef.current) clearTimeout(workerTimerRef.current);
+    };
+  }, []);
+
   // Initialize Google APIs and check auth status
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Check if GoogleAPI is available
         if (!GoogleAPI.loadGapi) {
           log('SYNC', 'Google API not loaded, using localStorage fallback');
           setIsLoadingAuth(false);
@@ -65,7 +146,7 @@ export function useGoogleDrive(data, setData, showNotification) {
 
         await GoogleAPI.loadGapi();
         await GoogleAPI.initGoogleAuth();
-        
+
         const userInfo = await GoogleAPI.checkAuthStatus();
         if (userInfo) {
           setIsAuthenticated(true);
@@ -85,7 +166,6 @@ export function useGoogleDrive(data, setData, showNotification) {
     initAuth();
   }, []);
 
-  // Handle sign in
   const handleSignIn = useCallback(async () => {
     try {
       setIsLoadingAuth(true);
@@ -102,10 +182,10 @@ export function useGoogleDrive(data, setData, showNotification) {
     }
   }, [showNotification]);
 
-  // Handle sign out
   const handleSignOut = useCallback(() => {
     log('SYNC', 'handleSignOut: clearing local storage');
     localStorage.removeItem('note-app-data-v1');
+    clearSyncState();
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
       if (key && key.startsWith('strata-cache-')) localStorage.removeItem(key);
@@ -123,7 +203,6 @@ export function useGoogleDrive(data, setData, showNotification) {
     window.location.reload();
   }, [showNotification]);
 
-  // Initialize Drive root folder
   useEffect(() => {
     if (!isAuthenticated || isLoadingAuth) return;
 
@@ -143,368 +222,107 @@ export function useGoogleDrive(data, setData, showNotification) {
     initDriveSync();
   }, [isAuthenticated, isLoadingAuth]);
 
-  // Orphan cleanup disabled - was causing data loss when app loaded from stale cache.
-  // Will be reimplemented as a manual settings button in a future update.
-  // useEffect(() => { ... cleanupOrphans ... }, [...]);
-
-  // Queue a Drive item for deletion during next structure sync
-  const queueDriveDelete = useCallback((driveIds) => {
-    // driveIds can be a single string or array of { type, driveId } objects
-    if (!driveIds) return;
-    const items = Array.isArray(driveIds) ? driveIds : [driveIds];
-    for (const item of items) {
-      const id = typeof item === 'string' ? item : item.driveId;
-      if (id) {
-        pendingDriveDeletesRef.current.push(id);
+  const enqueueStructureFromTree = useCallback((tree) => {
+    const notebooks = tree?.notebooks || [];
+    for (const notebook of notebooks) {
+      enqueueOp(
+        { type: 'ensureFolder', entityType: 'notebook', appId: notebook.id },
+        `folder:${notebook.id}`
+      );
+      for (const tab of notebook.tabs || []) {
+        enqueueOp(
+          { type: 'ensureFolder', entityType: 'tab', appId: tab.id, notebookId: notebook.id },
+          `folder:${tab.id}`
+        );
+        for (const page of tab.pages || []) {
+          enqueueOp(
+            { type: 'ensurePageFile', pageId: page.id, tabId: tab.id, notebookId: notebook.id },
+            `page:${page.id}`
+          );
+        }
       }
     }
+    enqueueOp({ type: 'saveIndex' }, 'saveIndex');
   }, []);
 
-  // Move an item physically in Google Drive
-  const moveItemInDrive = useCallback(async (itemId, newParentId, oldParentId) => {
-    if (!isAuthenticated || !itemId || !newParentId || !oldParentId) return;
-    try {
-      await GoogleAPI.moveDriveItem(itemId, newParentId, oldParentId);
-      log('SYNC', `Moved item ${itemId} from ${oldParentId} to ${newParentId}`);
-    } catch (error) {
-      log('ERROR', 'Error moving item in Drive:', error);
+  const bootEnqueuedRef = useRef(false);
+  useEffect(() => {
+    if (hasInitialLoadCompleted && isAuthenticated && driveRootFolderId) {
+      if (!bootEnqueuedRef.current) {
+        bootEnqueuedRef.current = true;
+        enqueueStructureFromTree(dataRef.current);
+      }
+      kickWorker();
     }
-  }, [isAuthenticated]);
+  }, [hasInitialLoadCompleted, isAuthenticated, driveRootFolderId, kickWorker, enqueueStructureFromTree]);
 
-  // Sync folder structure to Drive (uses dataRef to avoid re-running on every data change)
-  useEffect(() => {
-    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !hasInitialLoadCompleted) return;
-    const currentData = dataRef.current;
-    if (!currentData?.notebooks) return;
+  const triggerStructureSync = useCallback((tree) => {
+    const snapshot = tree || getLiveTree() || dataRef.current;
+    persistNotebookData(snapshot);
+    dataRef.current = snapshot;
+    enqueueStructureFromTree(snapshot);
+    kickWorker();
+  }, [enqueueStructureFromTree, kickWorker]);
 
-    const syncStructure = async () => {
-      if (syncLockRef.current) {
-        log('SYNC', 'structure sync: lock held, deferring');
-        pendingSyncRef.current = true;
-        return;
+  const triggerContentSync = useCallback(
+    (pageId) => {
+      const snapshot = getLiveTree() || dataRef.current;
+      persistNotebookData(snapshot);
+      dataRef.current = snapshot;
+      if (pageId) {
+        enqueueOp({ type: 'patchPage', pageId }, `patch:${pageId}`);
       }
-      syncLockRef.current = true;
-      const dataToSync = dataRef.current;
-      log('SYNC', 'structure sync: start', { notebookCount: dataToSync?.notebooks?.length });
-      
-      try {
-        setIsSyncing(true);
+      kickWorker();
+    },
+    [kickWorker]
+  );
 
-        // Drain pending deletes queue
-        if (pendingDriveDeletesRef.current.length > 0) {
-          const deletesToProcess = [...pendingDriveDeletesRef.current];
-          pendingDriveDeletesRef.current = [];
-          for (const driveId of deletesToProcess) {
-            try {
-              await GoogleAPI.deleteDriveItem(driveId);
-            } catch (error) {
-              log('ERROR', `Error deleting Drive item ${driveId}:`, error);
-            }
-          }
-        }
+  const queueDriveDelete = useCallback(
+    (driveIds) => {
+      const snapshot = getLiveTree() || dataRef.current;
+      persistNotebookData(snapshot);
+      dataRef.current = snapshot;
+      enqueueTrash(driveIds);
+      enqueueOp({ type: 'saveIndex' }, 'saveIndex');
+      kickWorker();
+    },
+    [kickWorker]
+  );
 
-        const driveIdUpdates = {};
+  const moveItemInDrive = useCallback(
+    async (itemId, newParentId, oldParentId) => {
+      if (!itemId || !newParentId || !oldParentId) return;
+      const snapshot = getLiveTree() || dataRef.current;
+      persistNotebookData(snapshot);
+      dataRef.current = snapshot;
+      enqueueOp(
+        { type: 'move', driveId: itemId, newParentId, oldParentId },
+        `move:${itemId}`
+      );
+      enqueueOp({ type: 'saveIndex' }, 'saveIndex');
+      kickWorker();
+    },
+    [kickWorker]
+  );
 
-        // Sync each notebook
-        for (const notebook of dataToSync.notebooks) {
-          let notebookFolderId;
-          if (!notebook.driveFolderId) {
-            try {
-              notebookFolderId = await GoogleAPI.getOrCreateFolder(notebook.name, driveRootFolderId);
-              driveIdUpdates[notebook.id] = { driveFolderId: notebookFolderId };
-            } catch (error) {
-              log('ERROR', `Error creating folder for notebook ${notebook.name}:`, error);
-              continue;
-            }
-          } else {
-            try {
-              notebookFolderId = await GoogleAPI.saveFolderIdempotent(notebook.driveFolderId, notebook.name, driveRootFolderId, { icon: notebook.icon });
-            } catch (error) {
-              log('ERROR', `Error updating notebook folder ${notebook.name}:`, error);
-              notebookFolderId = notebook.driveFolderId;
-            }
-          }
-
-          if (!notebookFolderId) continue;
-
-          // Sync tabs
-          for (const tab of notebook.tabs) {
-            let tabFolderId;
-            if (!tab.driveFolderId) {
-              try {
-                tabFolderId = await GoogleAPI.getOrCreateFolder(tab.name, notebookFolderId);
-                if (!driveIdUpdates[notebook.id]) driveIdUpdates[notebook.id] = { tabs: {} };
-                if (!driveIdUpdates[notebook.id].tabs) driveIdUpdates[notebook.id].tabs = {};
-                driveIdUpdates[notebook.id].tabs[tab.id] = { driveFolderId: tabFolderId };
-              } catch (error) {
-                log('ERROR', `Error creating folder for tab ${tab.name}:`, error);
-                continue;
-              }
-            } else {
-              try {
-                tabFolderId = await GoogleAPI.saveFolderIdempotent(tab.driveFolderId, tab.name, notebookFolderId, { icon: tab.icon, tabColor: tab.color });
-              } catch (error) {
-                log('ERROR', `Error updating tab folder ${tab.name}:`, error);
-                tabFolderId = tab.driveFolderId;
-              }
-            }
-
-            if (!tabFolderId) continue;
-
-            // Sync pages
-            for (const page of tab.pages) {
-              const pageType = page.type || 'block';
-              const isGooglePage = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'map', 'site', 'script', 'drive'].includes(pageType);
-              
-              if (isGooglePage || page.embedUrl) {
-                if (!page.driveLinkFileId) {
-                  try {
-                    const fileId = await GoogleAPI.syncGooglePageLink(page, tabFolderId);
-                    if (!driveIdUpdates[notebook.id]) driveIdUpdates[notebook.id] = { tabs: {} };
-                    if (!driveIdUpdates[notebook.id].tabs) driveIdUpdates[notebook.id].tabs = {};
-                    if (!driveIdUpdates[notebook.id].tabs[tab.id]) driveIdUpdates[notebook.id].tabs[tab.id] = { pages: {} };
-                    if (!driveIdUpdates[notebook.id].tabs[tab.id].pages) driveIdUpdates[notebook.id].tabs[tab.id].pages = {};
-                    driveIdUpdates[notebook.id].tabs[tab.id].pages[page.id] = { driveLinkFileId: fileId };
-                  } catch (error) {
-                    log('ERROR', `Error creating link file for page ${page.name}:`, error);
-                  }
-                } else {
-                  try {
-                    await GoogleAPI.updateFileProperties(page.driveLinkFileId, { icon: page.icon, pageType: pageType });
-                  } catch (error) {
-                    log('ERROR', `Error updating page properties ${page.name}:`, error);
-                  }
-                }
-              } else if (!page.driveFileId) {
-                try {
-                  const fileId = await GoogleAPI.syncPageToDrive(page, tabFolderId);
-                  if (!driveIdUpdates[notebook.id]) driveIdUpdates[notebook.id] = { tabs: {} };
-                  if (!driveIdUpdates[notebook.id].tabs) driveIdUpdates[notebook.id].tabs = {};
-                  if (!driveIdUpdates[notebook.id].tabs[tab.id]) driveIdUpdates[notebook.id].tabs[tab.id] = { pages: {} };
-                  if (!driveIdUpdates[notebook.id].tabs[tab.id].pages) driveIdUpdates[notebook.id].tabs[tab.id].pages = {};
-                  driveIdUpdates[notebook.id].tabs[tab.id].pages[page.id] = { driveFileId: fileId };
-                } catch (error) {
-                  log('ERROR', `Error creating file for page ${page.name}:`, error);
-                }
-              } else {
-                try {
-                  await GoogleAPI.updateFileProperties(page.driveFileId, { icon: page.icon, pageType: pageType });
-                } catch (error) {
-                  log('ERROR', `Error updating page properties ${page.name}:`, error);
-                }
-              }
-            }
-          }
-        }
-
-        // Apply drive ID updates
-        if (Object.keys(driveIdUpdates).length > 0) {
-          log('SYNC', 'structure sync: applying driveIdUpdates', { driveIdUpdates });
-          setData(prev => {
-            const next = { ...prev, notebooks: prev.notebooks.map(notebook => {
-              const nbUpdate = driveIdUpdates[notebook.id];
-              if (!nbUpdate) return notebook;
-              
-              return {
-                ...notebook,
-                driveFolderId: nbUpdate.driveFolderId || notebook.driveFolderId,
-                tabs: notebook.tabs.map(tab => {
-                  const tabUpdate = nbUpdate.tabs?.[tab.id];
-                  if (!tabUpdate) return tab;
-                  
-                  return {
-                    ...tab,
-                    driveFolderId: tabUpdate.driveFolderId || tab.driveFolderId,
-                    pages: tab.pages.map(page => {
-                      const pageUpdate = tabUpdate.pages?.[page.id];
-                      if (!pageUpdate) return page;
-                      
-                      return {
-                        ...page,
-                        driveFileId: pageUpdate.driveFileId || page.driveFileId,
-                        driveShortcutId: pageUpdate.driveShortcutId || page.driveShortcutId,
-                        driveLinkFileId: pageUpdate.driveLinkFileId || page.driveLinkFileId
-                      };
-                    })
-                  };
-                })
-              };
-            })};
-            return next;
-          });
-        }
-
-        // Build index data (use Drive IDs for order - survives reload when app IDs are regenerated)
-        const mergedNotebooks = dataToSync.notebooks.map(nb => {
-          const nbUpdate = driveIdUpdates[nb.id];
-          return {
-            driveFolderId: nbUpdate?.driveFolderId || nb.driveFolderId,
-            tabs: nb.tabs.map(tab => {
-              const tabUpdate = nbUpdate?.tabs?.[tab.id];
-              return {
-                driveFolderId: tabUpdate?.driveFolderId || tab.driveFolderId,
-                pages: tab.pages.map(page => {
-                  const pageUpdate = tabUpdate?.pages?.[page.id];
-                  return pageUpdate?.driveFileId || pageUpdate?.driveLinkFileId || page.driveFileId || page.driveLinkFileId;
-                }).filter(Boolean)
-              };
-            })
-          };
-        });
-        const indexData = {
-          notebooks: mergedNotebooks.map(nb => nb.driveFolderId).filter(Boolean),
-          tabs: {},
-          pages: {}
-        };
-        for (const nb of mergedNotebooks) {
-          if (nb.driveFolderId) {
-            indexData.tabs[nb.driveFolderId] = nb.tabs.map(t => t.driveFolderId).filter(Boolean);
-            for (const tab of nb.tabs) {
-              if (tab.driveFolderId && tab.pages.length > 0) {
-                indexData.pages[tab.driveFolderId] = tab.pages;
-              }
-            }
-          }
-        }
-        try {
-          await GoogleAPI.saveIndexFile(driveRootFolderId, indexData);
-          log('SYNC', 'structure sync: strata_index.json saved');
-        } catch (error) {
-          log('ERROR', 'Error saving strata_index.json:', error);
-        }
-        
-        // Update manifest.json and index.html (use dataRef for latest structure)
-        try {
-          await GoogleAPI.updateManifest(dataRef.current, driveRootFolderId, APP_VERSION);
-          await GoogleAPI.uploadIndexHtml(generateOfflineViewerHtml(), driveRootFolderId);
-          log('SYNC', 'structure sync: manifest and index.html updated');
-        } catch (error) {
-          log('ERROR', 'Error updating manifest/index.html:', error);
-        }
-        
-        localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current.notebooks));
-        setLastSyncTime(Date.now());
-        log('SYNC', 'structure sync: complete');
-      } catch (error) {
-        log('ERROR', 'Error syncing structure:', error);
-      } finally {
-        setIsSyncing(false);
-        setHasUnsyncedChanges(false);
-        syncLockRef.current = false;
-        
-        if (pendingSyncRef.current) {
-          pendingSyncRef.current = false;
-          setTimeout(syncStructure, 1000);
-        }
-        
-        // If a content sync was blocked by the lock, trigger a retry
-        if (pendingContentSyncRef.current) {
-          pendingContentSyncRef.current = false;
-          setTimeout(() => setContentSyncVersion(v => v + 1), 2000);
-        }
-      }
-    };
-
-    // Reduced delay for faster sync (localStorage provides immediate backup now)
-    const syncTimeout = setTimeout(syncStructure, 1000);
-    return () => clearTimeout(syncTimeout);
-  }, [structureVersion, isAuthenticated, isLoadingAuth, driveRootFolderId, hasInitialLoadCompleted, setData]);
-
-  // Content sync - update page content files (uses dataRef to avoid re-running on every data change)
-  useEffect(() => {
-    if (!isAuthenticated || isLoadingAuth || !driveRootFolderId || !hasInitialLoadCompleted) return;
-    const currentData = dataRef.current;
-    if (!currentData?.notebooks) return;
-    
-    const syncContent = async () => {
-      if (syncLockRef.current) {
-        log('SYNC', 'content sync: structure lock held, deferring');
-        pendingContentSyncRef.current = true;
-        return;
-      }
-      setIsSyncing(true);
-      log('SYNC', 'content sync: start');
-      
-      try {
-        const dataToSync = dataRef.current;
-        let pagesSynced = 0;
-        for (const notebook of dataToSync.notebooks) {
-          for (const tab of notebook.tabs) {
-            const tabFolderId = tab.driveFolderId;
-            if (!tabFolderId) continue;
-            
-            for (const page of tab.pages) {
-              const pageType = page.type || 'block';
-              // Google/embed pages that link to external files (not stored as JSON)
-              const isGooglePage = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'map', 'site', 'script', 'drive'].includes(pageType);
-              
-              if (!dirtyPagesRef.current.has(page.id)) continue;
-              
-              // Sync block page content (JSON storage)
-              if (!isGooglePage && page.driveFileId && !page.embedUrl) {
-                try {
-                  await GoogleAPI.syncPageToDrive(page, tabFolderId);
-                  pagesSynced++;
-                } catch (error) {
-                  log('ERROR', `Error updating page content ${page.name}:`, error);
-                  log('SYNC', 'content sync: error', { page: page.name, error: error?.message });
-                }
-              }
-              // Sync Google/embed page link (embedUrl, webViewLink) when edit/preview mode changes
-              else if (isGooglePage || page.embedUrl) {
-                try {
-                  await GoogleAPI.syncGooglePageLink(page, tabFolderId);
-                  pagesSynced++;
-                } catch (error) {
-                  log('ERROR', `Error syncing Google page link ${page.name}:`, error);
-                }
-              }
-            }
-          }
-        }
-        dirtyPagesRef.current.clear();
-        localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current.notebooks));
-        lastContentSyncRef.current = Date.now();
-        log('SYNC', 'content sync: complete', { pagesSynced });
-      } finally {
-        setIsSyncing(false);
-        setHasUnsyncedChanges(false);
-      }
-    };
-
-    const contentSyncTimeout = setTimeout(syncContent, 2000);
-    return () => clearTimeout(contentSyncTimeout);
-  }, [isAuthenticated, isLoadingAuth, driveRootFolderId, hasInitialLoadCompleted, contentSyncVersion]);
-
-  // Trigger content sync
-  const triggerContentSync = useCallback((pageId) => {
-    if (pageId) dirtyPagesRef.current.add(pageId);
-    setHasUnsyncedChanges(true);
-    setContentSyncVersion(v => v + 1);
-  }, []);
-
-  // Trigger structure sync
-  const triggerStructureSync = useCallback(() => {
-    setHasUnsyncedChanges(true);
-    setStructureVersion(v => v + 1);
-  }, []);
-
-  // Load data from Drive
   const loadFromDrive = useCallback(async () => {
     if (!isAuthenticated || isLoadingAuth) return null;
-    
+
     try {
       const cacheKey = userEmail ? `strata-cache-${userEmail}` : null;
       const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-      // Check cache first
       let cached = null;
       if (cacheKey) {
         const sessionCached = sessionStorage.getItem(cacheKey);
         const localCached = localStorage.getItem(cacheKey);
-        
+
         if (sessionCached) {
-          try { cached = JSON.parse(sessionCached); } catch (e) { /* ignore */ }
+          try {
+            cached = JSON.parse(sessionCached);
+          } catch {
+            /* ignore */
+          }
         }
         if (!cached && localCached) {
           try {
@@ -513,133 +331,132 @@ export function useGoogleDrive(data, setData, showNotification) {
             if (age < CACHE_MAX_AGE_MS && parsed.data) {
               cached = parsed;
             }
-          } catch (e) { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
         log('SYNC', 'loadFromDrive: cache check', { cacheKey, hasCached: !!cached, cachedNotebookCount: cached?.data?.notebooks?.length });
       }
 
-      // Get root folder
       const rootFolderId = await GoogleAPI.getOrCreateRootFolder();
       log('SYNC', 'loadFromDrive: root folder', { rootFolderId });
-      
-      // Load from Drive
+
       const driveData = await GoogleAPI.loadFromDriveStructure(rootFolderId);
-      
+
       if (driveData && driveData.notebooks) {
         log('SYNC', 'loadFromDrive: loaded from Drive', { notebookCount: driveData.notebooks.length });
         const reconciled = reconcileData(driveData);
         setDriveRootFolderId(rootFolderId);
-        // Cache the data
         if (cacheKey) {
           const cacheEntry = { data: reconciled, timestamp: Date.now() };
           try {
             sessionStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
             localStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
-          } catch (e) { /* quota or disabled */ }
+          } catch {
+            /* quota or disabled */
+          }
         }
-        setHasInitialLoadCompleted(true);
         return reconciled;
       }
-      
+
       if (cached?.data) {
         log('SYNC', 'loadFromDrive: using cached data', { notebookCount: cached.data.notebooks?.length });
         const reconciled = reconcileData(cached.data);
         setDriveRootFolderId(rootFolderId);
-        setHasInitialLoadCompleted(true);
         return reconciled;
       }
-      
+
       log('SYNC', 'loadFromDrive: Drive empty or failed');
       setDriveRootFolderId(rootFolderId);
-      setHasInitialLoadCompleted(true);
       return null;
     } catch (error) {
       log('ERROR', 'Error loading from Drive:', error);
       if (error.message?.includes('Authentication')) {
         showNotification?.('Authentication expired. Please sign in again.', 'error');
       }
-      setHasInitialLoadCompleted(true);
       return null;
     }
-  }, [isAuthenticated, isLoadingAuth, userEmail, showNotification, setData]);
+  }, [isAuthenticated, isLoadingAuth, userEmail, showNotification]);
 
-  // Sync rename to Drive
-  const syncRenameToDrive = useCallback(async (type, id) => {
-    if (!isAuthenticated) return;
-    const currentData = dataRef.current;
-    if (!currentData?.notebooks) return;
-    
-    for (const nb of currentData.notebooks) {
-      if (type === 'notebook' && nb.id === id && nb.driveFolderId) {
-        try {
-          await GoogleAPI.renameDriveItem(nb.driveFolderId, GoogleAPI.sanitizeFileName(nb.name));
-        } catch (err) {
-          log('ERROR', 'Error updating notebook folder:', err);
-        }
-        triggerStructureSync();
-        return;
-      }
-      for (const tab of nb.tabs) {
-        if (type === 'tab' && tab.id === id && tab.driveFolderId) {
-          try {
-            await GoogleAPI.renameDriveItem(tab.driveFolderId, GoogleAPI.sanitizeFileName(tab.name));
-          } catch (err) {
-            log('ERROR', 'Error updating tab folder:', err);
-          }
+  const markInitialLoadComplete = useCallback(() => {
+    setHasInitialLoadCompleted(true);
+  }, []);
+
+  const syncRenameToDrive = useCallback(
+    (type, id) => {
+      const currentData = dataRef.current;
+      if (!currentData?.notebooks) return;
+
+      for (const nb of currentData.notebooks) {
+        if (type === 'notebook' && nb.id === id && nb.driveFolderId) {
+          enqueueOp(
+            { type: 'rename', driveId: nb.driveFolderId, name: GoogleAPI.sanitizeFileName(nb.name) },
+            `rename:${nb.driveFolderId}`
+          );
           triggerStructureSync();
           return;
         }
-        for (const pg of tab.pages) {
-          if (pg.id === id) {
-            if (pg.driveFileId) {
-              try {
-                await GoogleAPI.renameDriveItem(pg.driveFileId, GoogleAPI.sanitizeFileName(pg.name) + '.json');
-              } catch (err) {
-                log('ERROR', 'Error updating page file:', err);
-              }
-            }
-            if (pg.driveShortcutId) {
-              try {
-                await GoogleAPI.renameDriveItem(pg.driveShortcutId, pg.name);
-              } catch (err) {
-                log('ERROR', 'Error updating page shortcut:', err);
-              }
-            }
-            triggerContentSync(id);
+        for (const tab of nb.tabs) {
+          if (type === 'tab' && tab.id === id && tab.driveFolderId) {
+            enqueueOp(
+              { type: 'rename', driveId: tab.driveFolderId, name: GoogleAPI.sanitizeFileName(tab.name) },
+              `rename:${tab.driveFolderId}`
+            );
             triggerStructureSync();
             return;
           }
+          for (const pg of tab.pages) {
+            if (pg.id === id) {
+              const fileId = pg.driveLinkFileId || pg.driveFileId;
+              if (fileId) {
+                enqueueOp(
+                  { type: 'rename', driveId: fileId, name: GoogleAPI.sanitizeFileName(pg.name) + '.json' },
+                  `rename:${fileId}`
+                );
+              }
+              triggerContentSync(id);
+              triggerStructureSync();
+              return;
+            }
+          }
         }
       }
-    }
-  }, [isAuthenticated, triggerStructureSync, triggerContentSync]);
+    },
+    [triggerStructureSync, triggerContentSync]
+  );
 
   useEffect(() => {
     const handleBeforeUnload = (e) => {
-      if (hasUnsyncedChanges) {
+      persistNotebookData(getLiveTree() || dataRef.current);
+      if (hasPendingOps()) {
         e.preventDefault();
         e.returnValue = 'You have unsynced changes. Please wait for sync to finish.';
       }
     };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        persistNotebookData(getLiveTree() || dataRef.current);
+      }
+    };
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsyncedChanges]);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
 
   return {
-    // Auth state
     isAuthenticated,
     isLoadingAuth,
     userEmail,
     userName,
-    
-    // Sync state
     driveRootFolderId,
     isSyncing,
     lastSyncTime,
     hasUnsyncedChanges,
     hasInitialLoadCompleted,
-    
-    // Actions
+    markInitialLoadComplete,
     handleSignIn,
     handleSignOut,
     loadFromDrive,
@@ -647,6 +464,6 @@ export function useGoogleDrive(data, setData, showNotification) {
     triggerContentSync,
     syncRenameToDrive,
     queueDriveDelete,
-    moveItemInDrive
+    moveItemInDrive,
   };
 }

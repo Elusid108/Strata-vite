@@ -10,7 +10,7 @@ export function StrataProvider({ children }) {
   const [notification, setNotification] = useState(null);
 
   // ==================== HOOKS ====================
-  const { settings, setSettings, data, setData, loadFromLocalStorage } = useLocalStorage(false, false);
+  const { settings, setSettings, data, setData, loadFromLocalStorage, setPersistEnabled } = useLocalStorage();
 
   const showNotification = useCallback((message, type = 'info') => {
     setNotification({ message, type });
@@ -33,8 +33,13 @@ export function StrataProvider({ children }) {
     syncRenameToDrive,
     queueDriveDelete,
     moveItemInDrive,
-    hasInitialLoadCompleted
+    hasInitialLoadCompleted,
+    markInitialLoadComplete,
   } = useGoogleDrive(data, setData, showNotification);
+
+  useEffect(() => {
+    if (hasInitialLoadCompleted) setPersistEnabled(true);
+  }, [hasInitialLoadCompleted, setPersistEnabled]);
 
   const { saveToHistory, undo, redo, canUndo, canRedo } = useHistory(data, setData, showNotification);
 
@@ -130,6 +135,7 @@ export function StrataProvider({ children }) {
     queueDriveDelete,
     moveItemInDrive,
     hasInitialLoadCompleted,
+    markInitialLoadComplete,
     // History
     saveToHistory,
     undo,

@@ -80,6 +80,8 @@ const SPECIAL_NAMES = new Set([
  * Clean up orphan Drive items that don't match any item in the app's data
  * Runs as a background task after sign-in.
  * Compares Drive folder contents against known Drive IDs from the data.
+ * NOT auto-run: scanner-style cleanup caused data loss with stale cache.
+ * Tombstones in sync-outbox are the supported delete path.
  * 
  * @param {Object} data - The app's notebook data
  * @param {string} rootFolderId - The Strata root folder ID in Drive

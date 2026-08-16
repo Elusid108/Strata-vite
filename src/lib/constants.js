@@ -7,6 +7,12 @@ export const DEBUG_SYNC = import.meta.env.VITE_STRATA_DEBUG_SYNC === 'true';
 // --- Tree Version ---
 export const TREE_VERSION = 2;
 
+/** Page types stored as a JSON link file pointing at an external Google/embed document */
+export const LINK_PAGE_TYPES = [
+  'doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'map', 'site', 'script', 'drive',
+  'lucidchart', 'miro', 'drawio'
+];
+
 // --- Colors ---
 export const COLORS = [
   { name: 'gray', label: 'Gray' },

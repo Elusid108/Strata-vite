@@ -610,128 +610,136 @@ const createFileWithProperties = async (fileMetadata, properties = {}) => {
     }
 };
 
-// Idempotent file save - checks fileId first, then name+parent, only creates as last resort
-const saveFileIdempotent = async (fileId, name, parentId, content, properties = {}) => {
+class DriveRequestError extends Error {
+    constructor(message, status) {
+        super(message);
+        this.name = 'DriveRequestError';
+        this.status = status;
+    }
+}
+
+const toStrataProperties = (properties = {}) => {
+    const props = {};
+    if (properties.appId !== undefined) props.strata_appId = String(properties.appId);
+    if (properties.pageType !== undefined) props.strata_pageType = String(properties.pageType);
+    if (properties.icon !== undefined) props.strata_icon = String(properties.icon);
+    if (properties.tabColor !== undefined) props.strata_tabColor = String(properties.tabColor);
+    if (properties.strata_appId) props.strata_appId = String(properties.strata_appId);
+    return props;
+};
+
+const driveMultipartUpload = async ({ fileId, metadata, content, etag }) => {
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    if (content !== null && content !== undefined) {
+        const blob = content instanceof Blob ? content : new Blob([typeof content === 'string' ? content : JSON.stringify(content)], { type: metadata.mimeType || 'application/json' });
+        form.append('file', blob);
+    }
+    const isUpdate = !!fileId;
+    const url = isUpdate
+        ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id,etag,name`
+        : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,etag,name`;
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    if (isUpdate && etag) headers['If-Match'] = etag;
+    const response = await fetch(url, {
+        method: isUpdate ? 'PATCH' : 'POST',
+        headers,
+        body: form
+    });
+    if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new DriveRequestError(text || response.statusText, response.status);
+    }
+    return response.json();
+};
+
+const findFileByAppId = async (parentId, appId, mimeType = null) => {
+    if (!parentId || !appId) return null;
+    await ensureAuthenticated();
+    const escaped = String(appId).replace(/'/g, "\\'");
+    let q = `'${parentId}' in parents and trashed=false and properties has { key='strata_appId' and value='${escaped}' }`;
+    if (mimeType) q += ` and mimeType='${mimeType}'`;
+    const response = await gapi.client.drive.files.list({
+        q,
+        fields: 'files(id, name, etag, properties)',
+        pageSize: 1
+    });
+    return response.result.files?.[0] || null;
+};
+
+const createFolderWithAppId = async (name, parentId, appId, properties = {}) => {
+    await ensureAuthenticated();
+    const fileMetadata = {
+        name: sanitizeFileName(name),
+        mimeType: 'application/vnd.google-apps.folder',
+        properties: toStrataProperties({ ...properties, appId })
+    };
+    if (parentId) fileMetadata.parents = [parentId];
+    const response = await gapi.client.drive.files.create({
+        resource: fileMetadata,
+        fields: 'id, name, etag, properties'
+    });
+    return { id: response.result.id, etag: response.result.etag };
+};
+
+const updateFolderExact = async (folderId, name, properties = {}) => {
+    await ensureAuthenticated();
+    const metadata = { name: sanitizeFileName(name) };
+    const props = toStrataProperties(properties);
+    if (Object.keys(props).length > 0) metadata.properties = props;
+    const response = await gapi.client.drive.files.update({
+        fileId: folderId,
+        resource: metadata,
+        fields: 'id, name, etag'
+    });
+    return { id: response.result.id, etag: response.result.etag };
+};
+
+const getFileEtag = async (fileId) => {
+    await ensureAuthenticated();
+    const response = await gapi.client.drive.files.get({
+        fileId,
+        fields: 'id, etag, trashed, name'
+    });
+    return response.result;
+};
+
+// File save: update by ID only, or create new. Never reuse a different file by name.
+const saveFileIdempotent = async (fileId, name, parentId, content, properties = {}, etag = null) => {
     try {
         await ensureAuthenticated();
-        
         const sanitizedName = sanitizeFileName(name);
-        
-        // Step 1: If fileId exists and is valid, update it
+        const props = toStrataProperties(properties);
+
         if (fileId) {
-            try {
-                const existing = await gapi.client.drive.files.get({
-                    fileId: fileId,
-                    fields: 'id, name, trashed'
-                });
-                if (!existing.result.trashed) {
-                    // File exists and is not trashed, update it
-                    const metadata = { name: sanitizedName };
-                    if (Object.keys(properties).length > 0) {
-                        const props = {};
-                        if (properties.pageType !== undefined) props.strata_pageType = String(properties.pageType);
-                        if (properties.icon !== undefined) props.strata_icon = String(properties.icon);
-                        if (properties.tabColor !== undefined) props.strata_tabColor = String(properties.tabColor);
-                        metadata.properties = props;
-                    }
-                    
-                    const form = new FormData();
-                    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-                    if (content !== null && content !== undefined) {
-                        form.append('file', new Blob([JSON.stringify(content)], { type: 'application/json' }));
-                    }
-                    
-                    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`, {
-                        method: 'PATCH',
-                        headers: { 'Authorization': `Bearer ${accessToken}` },
-                        body: form
-                    });
-                    
-                    if (DEBUG_SYNC) console.log('[Strata Sync] saveFileIdempotent: updated by fileId', { name: sanitizedName, fileId });
-                    return fileId;
-                }
-            } catch (e) {
-                // File doesn't exist or is trashed, continue to search by name
+            const existing = await getFileEtag(fileId);
+            if (existing.trashed) {
+                throw new DriveRequestError('File is trashed', 404);
             }
-        }
-        
-        // Step 2: Search for file with same name in parent
-        const searchQuery = parentId 
-            ? `name='${sanitizedName.replace(/'/g, "\\'")}' and '${parentId}' in parents and trashed=false`
-            : `name='${sanitizedName.replace(/'/g, "\\'")}' and 'root' in parents and trashed=false`;
-        
-        const searchResponse = await gapi.client.drive.files.list({
-            q: searchQuery,
-            fields: 'files(id, name)',
-            pageSize: 1
-        });
-        
-        if (searchResponse.result.files && searchResponse.result.files.length > 0) {
-            // Found existing file, update it
-            const existingFileId = searchResponse.result.files[0].id;
             const metadata = { name: sanitizedName };
-            if (Object.keys(properties).length > 0) {
-                const props = {};
-                if (properties.pageType !== undefined) props.strata_pageType = String(properties.pageType);
-                if (properties.icon !== undefined) props.strata_icon = String(properties.icon);
-                if (properties.tabColor !== undefined) props.strata_tabColor = String(properties.tabColor);
-                metadata.properties = props;
-            }
-            
-            const form = new FormData();
-            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-            if (content !== null && content !== undefined) {
-                form.append('file', new Blob([JSON.stringify(content)], { type: 'application/json' }));
-            }
-            
-            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart`, {
-                method: 'PATCH',
-                headers: { 'Authorization': `Bearer ${accessToken}` },
-                body: form
+            if (Object.keys(props).length > 0) metadata.properties = props;
+            const result = await driveMultipartUpload({
+                fileId,
+                metadata,
+                content,
+                etag: etag || existing.etag
             });
-            
-            if (DEBUG_SYNC) console.log('[Strata Sync] saveFileIdempotent: updated by search', { name: sanitizedName, existingFileId });
-            return existingFileId;
+            if (DEBUG_SYNC) console.log('[Strata Sync] saveFileIdempotent: updated by fileId', { name: sanitizedName, fileId });
+            return result.id;
         }
-        
-        // Step 3: Create new file as last resort
+
         const metadata = {
             name: sanitizedName,
             mimeType: 'application/json'
         };
-        if (parentId) {
-            metadata.parents = [parentId];
-        }
-        if (Object.keys(properties).length > 0) {
-            const props = {};
-            if (properties.pageType !== undefined) props.strata_pageType = String(properties.pageType);
-            if (properties.icon !== undefined) props.strata_icon = String(properties.icon);
-            if (properties.tabColor !== undefined) props.strata_tabColor = String(properties.tabColor);
-            metadata.properties = props;
-        }
-        
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        if (content !== null && content !== undefined) {
-            form.append('file', new Blob([JSON.stringify(content)], { type: 'application/json' }));
-        }
-        
-        const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-            body: form
-        });
-        
-        if (!response.ok) {
-            throw new Error(`Failed to create file: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
+        if (parentId) metadata.parents = [parentId];
+        if (Object.keys(props).length > 0) metadata.properties = props;
+        const result = await driveMultipartUpload({ metadata, content });
         if (DEBUG_SYNC) console.log('[Strata Sync] saveFileIdempotent: created new', { name: sanitizedName, fileId: result.id });
         return result.id;
     } catch (error) {
         console.error('Error in saveFileIdempotent:', error);
-        if (error.status === 401 || error.message.includes('Authentication')) {
+        if (error.status === 401 || error.message?.includes('Authentication')) {
             await handleTokenExpiration();
             throw new Error('Authentication expired');
         }
@@ -739,94 +747,41 @@ const saveFileIdempotent = async (fileId, name, parentId, content, properties = 
     }
 };
 
-// Idempotent folder save - checks folderId first, then name+parent, only creates as last resort
+// Folder save: update by ID only, or create new. Never reuse a different folder by name.
 const saveFolderIdempotent = async (folderId, name, parentId, properties = {}) => {
     try {
         await ensureAuthenticated();
-        
         const sanitizedName = sanitizeFileName(name);
-        
-        // Step 1: If folderId exists and is valid, update it
+        const props = toStrataProperties(properties);
+
         if (folderId) {
-            try {
-                const existing = await gapi.client.drive.files.get({
-                    fileId: folderId,
-                    fields: 'id, name, trashed'
-                });
-                if (!existing.result.trashed) {
-                    // Folder exists and is not trashed, update it
-                    const metadata = { name: sanitizedName };
-                    if (Object.keys(properties).length > 0) {
-                        const props = {};
-                        if (properties.icon !== undefined) props.strata_icon = String(properties.icon);
-                        if (properties.tabColor !== undefined) props.strata_tabColor = String(properties.tabColor);
-                        metadata.properties = props;
-                    }
-                    
-                    await gapi.client.drive.files.update({
-                        fileId: folderId,
-                        resource: metadata,
-                        fields: 'id, name'
-                    });
-                    
-                    return folderId;
-                }
-            } catch (e) {
-                // Folder doesn't exist or is trashed, continue to search by name
-            }
-        }
-        
-        // Step 2: Search for folder with same name in parent
-        const searchQuery = parentId 
-            ? `name='${sanitizedName.replace(/'/g, "\\'")}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-            : `name='${sanitizedName.replace(/'/g, "\\'")}' and 'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-        
-        const searchResponse = await gapi.client.drive.files.list({
-            q: searchQuery,
-            fields: 'files(id, name)',
-            pageSize: 1
-        });
-        
-        if (searchResponse.result.files && searchResponse.result.files.length > 0) {
-            // Found existing folder, update it
-            const existingFolderId = searchResponse.result.files[0].id;
-            const metadata = { name: sanitizedName };
-            if (Object.keys(properties).length > 0) {
-                const props = {};
-                if (properties.icon !== undefined) props.strata_icon = String(properties.icon);
-                if (properties.tabColor !== undefined) props.strata_tabColor = String(properties.tabColor);
-                metadata.properties = props;
-            }
-            
-            await gapi.client.drive.files.update({
-                fileId: existingFolderId,
-                resource: metadata,
-                fields: 'id, name'
+            const existing = await gapi.client.drive.files.get({
+                fileId: folderId,
+                fields: 'id, name, trashed, etag'
             });
-            
-            return existingFolderId;
+            if (existing.result.trashed) {
+                throw new DriveRequestError('Folder is trashed', 404);
+            }
+            const metadata = { name: sanitizedName };
+            if (Object.keys(props).length > 0) metadata.properties = props;
+            const response = await gapi.client.drive.files.update({
+                fileId: folderId,
+                resource: metadata,
+                fields: 'id, name, etag'
+            });
+            return response.result.id;
         }
-        
-        // Step 3: Create new folder as last resort
+
         const fileMetadata = {
             name: sanitizedName,
             mimeType: 'application/vnd.google-apps.folder'
         };
-        if (parentId) {
-            fileMetadata.parents = [parentId];
-        }
-        if (Object.keys(properties).length > 0) {
-            const props = {};
-            if (properties.icon !== undefined) props.strata_icon = String(properties.icon);
-            if (properties.tabColor !== undefined) props.strata_tabColor = String(properties.tabColor);
-            fileMetadata.properties = props;
-        }
-        
+        if (parentId) fileMetadata.parents = [parentId];
+        if (Object.keys(props).length > 0) fileMetadata.properties = props;
         const response = await gapi.client.drive.files.create({
             resource: fileMetadata,
-            fields: 'id, name'
+            fields: 'id, name, etag'
         });
-        
         return response.result.id;
     } catch (error) {
         console.error('Error in saveFolderIdempotent:', error);
@@ -1039,17 +994,12 @@ const saveIndexFile = async (rootFolderId, indexData) => {
         if (existing.result.files && existing.result.files.length > 0) {
             // Update existing file
             const fileId = existing.result.files[0].id;
-            const form = new FormData();
-            form.append('metadata', new Blob([JSON.stringify({ name: 'strata_index.json' })], { type: 'application/json' }));
-            form.append('file', new Blob([content], { type: 'application/json' }));
-            
-            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`, {
-                method: 'PATCH',
-                headers: { 'Authorization': `Bearer ${accessToken}` },
-                body: form
+            const result = await driveMultipartUpload({
+                fileId,
+                metadata: { name: 'strata_index.json' },
+                content: new Blob([content], { type: 'application/json' })
             });
-            
-            return fileId;
+            return result.id || fileId;
         } else {
             // Create new file
             const metadata = {
@@ -1315,6 +1265,7 @@ const savePageFile = async (page, tabFolderId) => {
         const contentToSave = (page.content && page.content.version === TREE_VER) ? page.content : (page.rows || page.content);
         if (DEBUG_SYNC) console.log('[Strata Sync] savePageFile: start', { pageName: page.name, driveFileId: page.driveFileId, hasContent: !!(contentToSave && (Array.isArray(contentToSave) ? contentToSave.length : contentToSave.children?.length)) });
         const pageContent = {
+            id: page.id,
             type: page.type || 'block',
             name: page.name,
             icon: page.icon,
@@ -1347,7 +1298,8 @@ const savePageFile = async (page, tabFolderId) => {
         }
         
         const properties = {
-            pageType: page.type || 'block'
+            pageType: page.type || 'block',
+            appId: page.id
         };
         if (page.icon) {
             properties.icon = page.icon;
@@ -1358,7 +1310,8 @@ const savePageFile = async (page, tabFolderId) => {
             fileName,
             tabFolderId,
             pageContent,
-            properties
+            properties,
+            page.driveEtag
         );
         
         if (DEBUG_SYNC) console.log('[Strata Sync] savePageFile: complete', { pageName: page.name, fileId });
@@ -1367,6 +1320,110 @@ const savePageFile = async (page, tabFolderId) => {
         console.error('Error saving page file:', error);
         throw error;
     }
+};
+
+const buildPageJsonContent = (page) => {
+    const contentToSave = (page.content && page.content.version === TREE_VER) ? page.content : (page.rows || page.content);
+    const pageContent = {
+        id: page.id,
+        type: page.type || 'block',
+        name: page.name,
+        icon: page.icon,
+        cover: page.cover,
+        content: contentToSave,
+        googleFileId: page.googleFileId,
+        url: page.url,
+        embedUrl: page.embedUrl,
+        webViewLink: page.webViewLink,
+        originalUrl: page.originalUrl,
+        driveFileId: page.driveFileId,
+        createdAt: page.createdAt,
+        modifiedAt: Date.now(),
+        starred: page.starred || false
+    };
+    if (page.type === 'mermaid' || page.type === 'code') {
+        const codeVal = page.code ?? page.mermaidCode ?? page.codeContent ?? '';
+        pageContent.code = codeVal;
+        pageContent.mermaidCode = page.mermaidCode ?? (page.codeType === 'mermaid' ? codeVal : '');
+        pageContent.codeType = page.codeType || 'mermaid';
+        if (page.mermaidViewport) pageContent.mermaidViewport = page.mermaidViewport;
+    }
+    if (page.type === 'canvas') pageContent.canvasData = page.canvasData;
+    if (page.type === 'database') pageContent.databaseData = page.databaseData;
+    return pageContent;
+};
+
+const buildLinkJsonContent = (page) => ({
+    id: page.id,
+    type: page.type || 'google-link',
+    name: page.name,
+    icon: page.icon,
+    embedUrl: page.embedUrl,
+    webViewLink: page.webViewLink,
+    originalUrl: page.originalUrl,
+    driveFileId: page.driveFileId,
+    starred: page.starred || false,
+    createdAt: page.createdAt,
+    modifiedAt: Date.now()
+});
+
+const writeJsonFile = async ({ fileId, parentId, name, content, properties, etag }) => {
+    await ensureAuthenticated();
+    const metadata = {
+        name: sanitizeFileName(name),
+        properties: toStrataProperties(properties)
+    };
+    if (!fileId) {
+        metadata.mimeType = 'application/json';
+        if (parentId) metadata.parents = [parentId];
+    }
+    try {
+        const result = await driveMultipartUpload({
+            fileId,
+            metadata,
+            content,
+            etag
+        });
+        return { id: result.id || fileId, etag: result.etag };
+    } catch (error) {
+        if (error.status === 412 && fileId) {
+            const latest = await getFileEtag(fileId);
+            const retry = await driveMultipartUpload({
+                fileId,
+                metadata,
+                content,
+                etag: latest.etag
+            });
+            return { id: retry.id || fileId, etag: retry.etag };
+        }
+        throw error;
+    }
+};
+
+const writePageJson = async (page, tabFolderId) => {
+    const fileName = sanitizeFileName(page.name) + '.json';
+    const properties = { pageType: page.type || 'block', appId: page.id, icon: page.icon };
+    return writeJsonFile({
+        fileId: page.driveFileId,
+        parentId: tabFolderId,
+        name: fileName,
+        content: buildPageJsonContent(page),
+        properties,
+        etag: page.driveEtag
+    });
+};
+
+const writeLinkJson = async (page, tabFolderId) => {
+    const fileName = sanitizeFileName(page.name) + '.json';
+    const properties = { pageType: page.type || 'drive', appId: page.id, icon: page.icon || '📄' };
+    return writeJsonFile({
+        fileId: page.driveLinkFileId,
+        parentId: tabFolderId,
+        name: fileName,
+        content: buildLinkJsonContent(page),
+        properties,
+        etag: page.driveEtag
+    });
 };
 
 // Robust save page to Drive with Check-Update-Create logic
@@ -1912,7 +1969,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
         // List notebook folders in root
         const notebooksResponse = await gapi.client.drive.files.list({
             q: `'${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-            fields: 'files(id, name, properties)',
+            fields: 'files(id, name, properties, etag)',
             orderBy: 'name'
         });
         
@@ -1924,10 +1981,11 @@ const loadFromDriveStructure = async (rootFolderId) => {
             if (folder.name === '_STRATA_TRASH') continue;
             const props = folder.properties || {};
             const notebook = {
-                id: `nb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                id: props.strata_appId || `nb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 name: folder.name,
                 icon: props.strata_icon || '📓',
                 driveFolderId: folder.id,
+                driveEtag: folder.etag,
                 tabs: [],
                 activeTabId: null
             };
@@ -1961,7 +2019,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
         for (const notebook of notebooks) {
             const tabsResponse = await gapi.client.drive.files.list({
                 q: `'${notebook.driveFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-                fields: 'files(id, name, properties)',
+                fields: 'files(id, name, properties, etag)',
                 orderBy: 'name'
             });
             
@@ -1971,11 +2029,12 @@ const loadFromDriveStructure = async (rootFolderId) => {
             for (const folder of tabsResponse.result.files || []) {
                 const props = folder.properties || {};
                 const tab = {
-                    id: `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    id: props.strata_appId || `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                     name: folder.name,
                     icon: props.strata_icon || '📋',
                     color: props.strata_tabColor || 'blue',
                     driveFolderId: folder.id,
+                    driveEtag: folder.etag,
                     pages: [],
                     activePageId: null
                 };
@@ -2016,7 +2075,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
             for (const tab of tabs) {
                 const pagesResponse = await gapi.client.drive.files.list({
                     q: `'${tab.driveFolderId}' in parents and mimeType='application/json' and trashed=false`,
-                    fields: 'files(id, name, properties)',
+                    fields: 'files(id, name, properties, etag)',
                     orderBy: 'name'
                 });
                 
@@ -2033,11 +2092,12 @@ const loadFromDriveStructure = async (rootFolderId) => {
                     const icon = props.strata_icon || '📄';
                     
                     const page = {
-                        id: `page_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        id: props.strata_appId || `page_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                         name: file.name.replace('.json', ''),
                         type: pageType,
                         icon: icon,
                         driveFileId: file.id,
+                        driveEtag: file.etag,
                         rows: [],
                         content: [],
                         cover: null,
@@ -2079,6 +2139,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
                         if (DEBUG_SYNC) console.log('[Strata Sync] loadFromDriveStructure: batch fetch null content', { pageName: page.name });
                         continue;
                     }
+                    if (pageContent.id) page.id = pageContent.id;
                     
                     // Derive page type from content when file properties lack it (fix for existing link files)
                     const googleTypes = ['doc', 'sheet', 'slide', 'pdf', 'drive', 'lucidchart', 'miro', 'drawio'];
@@ -2142,12 +2203,12 @@ const loadFromDriveStructure = async (rootFolderId) => {
                     const orderedPages = [];
                     const unorderedPages = [];
                     for (const pageDriveFileId of pageOrderForTab) {
-                        const page = pages.find(p => (p.driveFileId || p.driveLinkFileId) === pageDriveFileId);
+                        const page = pages.find(p => p.driveLinkFileId === pageDriveFileId || p.driveFileId === pageDriveFileId);
                         if (page) orderedPages.push(page);
                     }
                     for (const page of pages) {
-                        const pageFileId = page.driveFileId || page.driveLinkFileId;
-                        if (!pageOrderForTab.includes(pageFileId)) {
+                        const pageFileId = page.driveLinkFileId || page.driveFileId;
+                        if (!pageOrderForTab.includes(pageFileId) && !pageOrderForTab.includes(page.driveFileId) && !pageOrderForTab.includes(page.driveLinkFileId)) {
                             unorderedPages.push(page);
                         }
                     }
@@ -2177,79 +2238,7 @@ const loadFromDriveStructure = async (rootFolderId) => {
 // Sync a Google page link to Drive (creates a JSON file with metadata)
 const syncGooglePageLink = async (page, tabFolderId) => {
     try {
-        await ensureAuthenticated();
-        
-        const fileName = sanitizeFileName(page.name) + '.json';
-        const linkContent = {
-            type: page.type || 'google-link',
-            name: page.name,
-            icon: page.icon,
-            embedUrl: page.embedUrl,
-            webViewLink: page.webViewLink,
-            driveFileId: page.driveFileId, // The linked Google file ID
-            starred: page.starred || false,
-            createdAt: page.createdAt,
-            modifiedAt: Date.now()
-        };
-        
-        // If page already has a link file ID, update it
-        if (page.driveLinkFileId) {
-            try {
-                const existing = await gapi.client.drive.files.get({
-                    fileId: page.driveLinkFileId,
-                    fields: 'id, name, trashed'
-                });
-                if (!existing.result.trashed) {
-                    // File exists, update it
-                    const updateMetadata = { name: fileName };
-                    const props = {
-                        strata_pageType: String(page.type || 'drive'),
-                        strata_icon: String(page.icon || '📄')
-                    };
-                    updateMetadata.properties = props;
-                    const form = new FormData();
-                    form.append('metadata', new Blob([JSON.stringify(updateMetadata)], { type: 'application/json' }));
-                    form.append('file', new Blob([JSON.stringify(linkContent)], { type: 'application/json' }));
-                    
-                    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${page.driveLinkFileId}?uploadType=multipart`, {
-                        method: 'PATCH',
-                        headers: { 'Authorization': `Bearer ${accessToken}` },
-                        body: form
-                    });
-                    return page.driveLinkFileId;
-                }
-            } catch (e) {
-                // File doesn't exist, will create new one
-            }
-        }
-        
-        // Create new link file
-        const metadata = {
-            name: fileName,
-            parents: [tabFolderId],
-            mimeType: 'application/json'
-        };
-        const props = {
-            strata_pageType: String(page.type || 'drive'),
-            strata_icon: String(page.icon || '📄')
-        };
-        metadata.properties = props;
-        
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', new Blob([JSON.stringify(linkContent)], { type: 'application/json' }));
-        
-        const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-            body: form
-        });
-        
-        if (!response.ok) {
-            throw new Error(`Failed to create link file: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
+        const result = await writeLinkJson(page, tabFolderId);
         return result.id;
     } catch (error) {
         console.error('Error syncing Google page link to Drive:', error);
@@ -2716,9 +2705,16 @@ const deleteDriveItem = async (itemId) => {
         
         return true;
     } catch (error) {
+        const status = error.status || error.result?.error?.code;
+        if (status === 404) {
+            return true;
+        }
         console.error('Error deleting Drive item:', error);
-        // Don't throw - deletion failure shouldn't break the app
-        return false;
+        if (status === 401) {
+            await handleTokenExpiration();
+            throw new Error('Authentication expired');
+        }
+        throw error;
     }
 };
 
@@ -3142,6 +3138,12 @@ export {
     // Idempotent save functions
     saveFileIdempotent,
     saveFolderIdempotent,
+    findFileByAppId,
+    createFolderWithAppId,
+    updateFolderExact,
+    writePageJson,
+    writeLinkJson,
+    DriveRequestError,
     // Index file functions
     getIndexFile,
     saveIndexFile,
@@ -3211,6 +3213,11 @@ export default {
     loadStructure,
     saveFileIdempotent,
     saveFolderIdempotent,
+    findFileByAppId,
+    createFolderWithAppId,
+    updateFolderExact,
+    writePageJson,
+    writeLinkJson,
     getIndexFile,
     saveIndexFile,
     saveNotebookFolder,

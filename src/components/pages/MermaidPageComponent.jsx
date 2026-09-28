@@ -10,6 +10,15 @@ import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import { MERMAID_MIN_SCALE, MERMAID_MAX_SCALE, MERMAID_ZOOM_STEP, PYODIDE_URL } from '../../lib/constants';
 import { Star, ZoomIn, ZoomOut, Maximize2, Download } from '../icons';
 
+// Mermaid is loaded on demand from npm (no render-blocking CDN script).
+let mermaidPromise = null;
+const getMermaid = () => {
+  if (!mermaidPromise) {
+    mermaidPromise = import('mermaid').then((m) => m.default || m);
+  }
+  return mermaidPromise;
+};
+
 // Helper functions
 const getCodeType = (p) => p.codeType || 'mermaid';
 
@@ -365,8 +374,22 @@ const MermaidPageComponent = ({
     return () => el.removeEventListener('wheel', handleMermaidWheel);
   }, [handleMermaidWheel, hasDiagram]);
 
+  const mermaidPointersRef = useRef(new Map());
+  const mermaidPinchRef = useRef(null);
+
   const handleMermaidPointerDown = (e) => {
     if (e.target.closest('button') || e.target.closest('a')) return;
+    mermaidPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (mermaidPointersRef.current.size === 2) {
+      const [a, b] = [...mermaidPointersRef.current.values()];
+      mermaidPinchRef.current = {
+        startDist: Math.hypot(a.x - b.x, a.y - b.y),
+        startScale: transformRef.current.scale,
+        lastCenter: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      };
+      setDragInfo(null);
+      return;
+    }
     if (e.button === 1 || e.button === 0) {
       e.preventDefault();
       const el = e.currentTarget;
@@ -376,6 +399,28 @@ const MermaidPageComponent = ({
   };
 
   const handleMermaidPointerMove = (e) => {
+    if (mermaidPointersRef.current.has(e.pointerId)) {
+      mermaidPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (mermaidPinchRef.current && mermaidPointersRef.current.size >= 2) {
+      const [a, b] = [...mermaidPointersRef.current.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const pinch = mermaidPinchRef.current;
+      const ratio = pinch.startDist > 0 ? dist / pinch.startDist : 1;
+      const rect = viewportRef.current ? viewportRef.current.getBoundingClientRect() : { left: 0, top: 0 };
+      const vx = center.x - rect.left;
+      const vy = center.y - rect.top;
+      const prev = transformRef.current;
+      const newScale = clampScale(pinch.startScale * ratio);
+      const dx = (vx - prev.x) / prev.scale;
+      const dy = (vy - prev.y) / prev.scale;
+      const panDx = center.x - pinch.lastCenter.x;
+      const panDy = center.y - pinch.lastCenter.y;
+      pinch.lastCenter = center;
+      setTransform({ x: vx - dx * newScale + panDx, y: vy - dy * newScale + panDy, scale: newScale });
+      return;
+    }
     if (!dragInfo || dragInfo.type !== 'pan') return;
     const dx = e.clientX - dragInfo.startX;
     const dy = e.clientY - dragInfo.startY;
@@ -383,6 +428,8 @@ const MermaidPageComponent = ({
   };
 
   const handleMermaidPointerUp = (e) => {
+    mermaidPointersRef.current.delete(e.pointerId);
+    if (mermaidPinchRef.current && mermaidPointersRef.current.size < 2) mermaidPinchRef.current = null;
     if (dragInfo) {
       try {
         const el = viewportRef.current;
@@ -400,33 +447,27 @@ const MermaidPageComponent = ({
       hasAppliedInitialFitRef.current = false;
       return;
     }
-    if (typeof window.mermaid === 'undefined') {
-      setMermaidError('Mermaid library not loaded');
-      hasAppliedInitialFitRef.current = false;
-      return;
-    }
-    
     renderIdRef.current += 1;
     const currentRenderId = renderIdRef.current;
     hasAppliedInitialFitRef.current = false;
     
     const isDarkMode = document.documentElement.classList.contains('dark');
     const mermaidTheme = isDarkMode ? 'dark' : 'default';
-    
-    if (!mermaidInitRef.current || mermaidInitRef.current !== mermaidTheme) {
-      try {
-        window.mermaid.initialize({ startOnLoad: false, theme: mermaidTheme });
-        mermaidInitRef.current = mermaidTheme;
-      } catch (e) {
-        setMermaidError('Failed to initialize Mermaid');
-        return;
-      }
-    }
-    setMermaidError(null);
-    
     const uniqueId = `mermaid-${page.id}-${currentRenderId}`;
-    window.mermaid.render(uniqueId, renderedCode.trim())
-      .then(({ svg, bindFunctions }) => {
+
+    getMermaid()
+      .then((mermaid) => {
+        if (currentRenderId !== renderIdRef.current) return null;
+        if (!mermaidInitRef.current || mermaidInitRef.current !== mermaidTheme) {
+          mermaid.initialize({ startOnLoad: false, theme: mermaidTheme });
+          mermaidInitRef.current = mermaidTheme;
+        }
+        setMermaidError(null);
+        return mermaid.render(uniqueId, renderedCode.trim());
+      })
+      .then((result) => {
+        if (!result) return;
+        const { svg, bindFunctions } = result;
         if (currentRenderId !== renderIdRef.current) return;
         mermaidBindFunctionsRef.current = bindFunctions;
 
@@ -500,19 +541,18 @@ const MermaidPageComponent = ({
     const mermaidTheme = isDarkMode ? 'dark' : 'default';
     
     if (mermaidInitRef.current !== mermaidTheme) {
-      try {
-        window.mermaid.initialize({ startOnLoad: false, theme: mermaidTheme });
-        mermaidInitRef.current = mermaidTheme;
-        const uniqueId = `mermaid-theme-${page.id}-${Date.now()}`;
-        window.mermaid.render(uniqueId, renderedCode.trim())
-          .then(({ svg, bindFunctions }) => {
-            mermaidBindFunctionsRef.current = bindFunctions;
-            setSvgContent(svg);
-          })
-          .catch(() => setMermaidError('Invalid Mermaid syntax'));
-      } catch (e) {
-        setMermaidError('Failed to reinitialize Mermaid');
-      }
+      const uniqueId = `mermaid-theme-${page.id}-${Date.now()}`;
+      getMermaid()
+        .then((mermaid) => {
+          mermaid.initialize({ startOnLoad: false, theme: mermaidTheme });
+          mermaidInitRef.current = mermaidTheme;
+          return mermaid.render(uniqueId, renderedCode.trim());
+        })
+        .then(({ svg, bindFunctions }) => {
+          mermaidBindFunctionsRef.current = bindFunctions;
+          setSvgContent(svg);
+        })
+        .catch(() => setMermaidError('Invalid Mermaid syntax'));
     }
   }, [codeType, renderedCode, currentTheme, page.id]);
 

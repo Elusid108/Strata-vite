@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
-import { getPickerPosition, getActiveContext } from '../../lib/utils';
+import { Suspense, lazy, useEffect } from 'react';
+import { LINK_PAGE_TYPES } from '../../lib/constants';
+import { getPickerPosition, getActiveContext, updatePageInData } from '../../lib/utils';
 
 const formatTimestamp = (ts) => {
   if (!ts) return null;
@@ -12,7 +13,18 @@ const formatTimestamp = (ts) => {
 import { countBlocksInTree } from '../../lib/tree-operations';
 import { Book, Plus, Trash2 } from '../../components/icons';
 import { BlockComponent } from '../blocks';
-import { CanvasPageComponent, TablePage, MermaidPageComponent } from '../pages';
+// Heavy page types (Canvas, CodeMirror-based Code/Mermaid, Table) load on demand.
+const CanvasPageComponent = lazy(() => import('../pages/CanvasPageComponent'));
+const TablePage = lazy(() => import('../pages/TablePage'));
+const MermaidPageComponent = lazy(() => import('../pages/MermaidPageComponent'));
+
+function PageLoading() {
+  return (
+    <div className="h-full flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
+      Loading…
+    </div>
+  );
+}
 import { EmbedPage } from '../embeds';
 import * as GoogleAPI from '../../lib/google-api';
 import { useStrata } from '../../contexts/StrataContext';
@@ -132,19 +144,7 @@ export function PageRenderer() {
             <EmbedPage
               page={p}
               onUpdate={(updates) => {
-                setData((prev) => ({
-                  ...prev,
-                  notebooks: prev.notebooks.map((nb) =>
-                    nb.id !== nbId
-                      ? nb
-                      : {
-                          ...nb,
-                          tabs: nb.tabs.map((tab) =>
-                            tab.id !== tId ? tab : { ...tab, pages: tab.pages.map((pg) => (pg.id === pageId ? { ...pg, ...updates } : pg)) }
-                          ),
-                        }
-                  ),
-                }));
+                setData((prev) => updatePageInData(prev, { notebookId: nbId, tabId: tId, pageId }, (pg) => ({ ...pg, ...updates })));
                 triggerContentSync(pageId);
               }}
               onToggleStar={() => toggleStar(p.id, nbId, tId)}
@@ -166,22 +166,28 @@ export function PageRenderer() {
           }`}
         >
           {activePage.type === 'canvas' ? (
-            <CanvasPageComponent
-              page={activePage}
-              onUpdate={handleCanvasUpdate}
-              saveToHistory={saveToHistory}
-              showNotification={showNotification}
-            />
+            <Suspense fallback={<PageLoading />}>
+              <CanvasPageComponent
+                page={activePage}
+                onUpdate={handleCanvasUpdate}
+                saveToHistory={saveToHistory}
+                showNotification={showNotification}
+              />
+            </Suspense>
           ) : activePage.type === 'database' ? (
-            <TablePage page={activePage} onUpdate={handleTableUpdate} />
+            <Suspense fallback={<PageLoading />}>
+              <TablePage page={activePage} onUpdate={handleTableUpdate} />
+            </Suspense>
           ) : activePage.type === 'mermaid' || activePage.type === 'code' ? (
-            <MermaidPageComponent
-              page={activePage}
-              onUpdate={handleMermaidUpdate}
-              saveToHistory={saveToHistory}
-              showNotification={showNotification}
-            />
-          ) : ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'site', 'script', 'drive', 'lucidchart', 'miro', 'drawio'].includes(activePage.type) ? (
+            <Suspense fallback={<PageLoading />}>
+              <MermaidPageComponent
+                page={activePage}
+                onUpdate={handleMermaidUpdate}
+                saveToHistory={saveToHistory}
+                showNotification={showNotification}
+              />
+            </Suspense>
+          ) : LINK_PAGE_TYPES.includes(activePage.type) ? (
             <div className="h-full flex flex-col items-center justify-center gap-4 text-gray-500 dark:text-gray-400 p-8">
               <div className="text-6xl">{activePage.icon || '📄'}</div>
               <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300">{activePage.name}</h2>
@@ -212,7 +218,7 @@ export function PageRenderer() {
             </div>
           ) : (
             <>
-              <div className="min-h-full bg-gray-100 dark:bg-gray-900 p-4">
+              <div className="min-h-full bg-gray-100 dark:bg-gray-900 p-2 sm:p-4">
                 <div className="max-w-4xl mx-auto min-h-[500px] bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden pb-10">
                   <div className="relative group/cover">
                     {activePage.cover && (
@@ -245,7 +251,7 @@ export function PageRenderer() {
                       )}
                     </div>
                   </div>
-                  <div className="px-8 py-8">
+                  <div className="page-body px-8 py-8">
                     <div className="flex items-center gap-4 mb-6">
                       <span
                         className="text-4xl cursor-pointer hover:opacity-80 page-icon-trigger"
@@ -281,7 +287,7 @@ export function PageRenderer() {
                         </div>
                       ) : (
                         rowsForEditor.map((row) => (
-                          <div key={row.id} className="flex gap-4 group/row relative items-stretch">
+                          <div key={row.id} className="block-row flex gap-4 group/row relative items-stretch">
                             {row.columns.map((col) => (
                               <div key={col.id} className="flex-1 min-w-[50px] space-y-2 flex flex-col">
                                 {col.blocks.map((block) => (

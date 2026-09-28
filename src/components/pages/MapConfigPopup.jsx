@@ -230,7 +230,7 @@ const MapConfigPopup = ({ blockId, currentData, onSave, onClose, position }) => 
 
   return (
     <div 
-      className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 shadow-xl rounded-lg p-4 z-[10000] min-w-[320px]"
+      className="strata-sheet fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 shadow-xl rounded-lg p-4 z-[10000] min-w-[320px]"
       style={getPopupStyle()}
       onClick={(e) => e.stopPropagation()}
     >

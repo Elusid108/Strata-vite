@@ -12,14 +12,39 @@ import {
   SyncNotReadyError,
   getLiveTree,
   getSyncState,
+  pendingPageIds,
+  tombstoneIdSet,
 } from '../lib/sync-outbox';
 import { processSyncOp } from '../lib/sync-engine';
 import { findPageContext, isLinkPage } from '../lib/sync-merge';
+import { applyDriveChanges, applyIndexOrder, planPageFetches } from '../lib/sync-pull';
+
+const CONTENT_KICK_DELAY_MS = 1500; // idle time after typing before a page upload starts
+const STRUCTURE_KICK_DELAY_MS = 50;
+const PULL_INTERVAL_MS = 60 * 1000;
+const TOKEN_REFRESH_AHEAD_MS = 5 * 60 * 1000;
+const CHANGES_TOKEN_KEY = 'strata_changes_token';
 
 function pageHasStrataFile(page) {
   if (!page) return false;
   if (isLinkPage(page)) return !!page.driveLinkFileId;
   return !!page.driveFileId;
+}
+
+function isOnline() {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
+function errorStatus(error) {
+  return error?.status || error?.result?.error?.code || null;
+}
+
+function isAuthError(error) {
+  return errorStatus(error) === 401 || /authentication|not authenticated/i.test(error?.message || '');
+}
+
+function isNetworkError(error) {
+  return error instanceof TypeError || /failed to fetch|network/i.test(error?.message || '');
 }
 
 function enqueueMissingParent(op, data) {
@@ -61,7 +86,8 @@ function enqueueMissingParent(op, data) {
 }
 
 /**
- * Hook for managing Google Drive authentication and serial outbox sync
+ * Hook for managing Google Drive authentication, the serial outbox (push) and
+ * the changes-feed pull loop.
  */
 export function useGoogleDrive(data, setData, showNotification) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -82,13 +108,19 @@ export function useGoogleDrive(data, setData, showNotification) {
     queue: [],
     error: null,
     lastSyncTime: null,
+    lastPullTime: null,
   });
 
   const workerLockRef = useRef(false);
+  const pullLockRef = useRef(false);
   const backoffRef = useRef(1000);
   const workerTimerRef = useRef(null);
   const pendingKickRef = useRef(false);
+  const pendingPullRef = useRef(false);
   const completedRef = useRef(0);
+  const signInRequiredRef = useRef(false);
+  const showNotificationRef = useRef(showNotification);
+  showNotificationRef.current = showNotification;
 
   const dataRef = useRef(data);
   useEffect(() => {
@@ -99,6 +131,9 @@ export function useGoogleDrive(data, setData, showNotification) {
   useEffect(() => {
     rootFolderRef.current = driveRootFolderId;
   }, [driveRootFolderId]);
+
+  const readyRef = useRef(false);
+  readyRef.current = isAuthenticated && !isLoadingAuth && !!driveRootFolderId && hasInitialLoadCompleted;
 
   const setDataAndRef = useCallback(
     (updater) => {
@@ -127,9 +162,133 @@ export function useGoogleDrive(data, setData, showNotification) {
     }));
   }, []);
 
+  // ------------------------------------------------------------------
+  // Pull: Drive changes feed -> local tree
+  // ------------------------------------------------------------------
+  const changesTokenKey = useCallback(() => `${CHANGES_TOKEN_KEY}:${rootFolderRef.current || 'none'}`, []);
+
+  const ensureChangesToken = useCallback(async () => {
+    const key = changesTokenKey();
+    if (localStorage.getItem(key)) return;
+    const token = await GoogleAPI.getStartPageToken();
+    localStorage.setItem(key, token);
+  }, [changesTokenKey]);
+
+  const runWorkerRef = useRef(null);
+
+  const pullFromDrive = useCallback(async ({ reason = 'manual' } = {}) => {
+    if (!readyRef.current || !isOnline() || signInRequiredRef.current) return;
+    if (workerLockRef.current) {
+      pendingPullRef.current = true;
+      return;
+    }
+    if (pullLockRef.current) return;
+    pullLockRef.current = true;
+    const rootFolderId = rootFolderRef.current;
+    try {
+      const key = changesTokenKey();
+      const token = localStorage.getItem(key);
+      if (!token) {
+        await ensureChangesToken();
+        return;
+      }
+      const { changes, newPageToken } = await GoogleAPI.getDriveChanges(token, rootFolderId);
+      log('SYNC', 'pull', { reason, changes: changes.length });
+      const tombstoneIds = tombstoneIdSet();
+      const pending = pendingPageIds();
+
+      if (changes.length > 0) {
+        const fileIds = planPageFetches(dataRef.current, changes, rootFolderId, { tombstoneIds });
+        const contents = new Map();
+        const BATCH = 8;
+        for (let i = 0; i < fileIds.length; i += BATCH) {
+          const batch = fileIds.slice(i, i + BATCH);
+          const results = await Promise.all(
+            batch.map(async (id) => {
+              try {
+                return [id, await GoogleAPI.getFileContent(id)];
+              } catch (error) {
+                log('SYNC', 'pull: could not fetch page', { id, error: error?.message });
+                return [id, null];
+              }
+            })
+          );
+          for (const [id, json] of results) if (json) contents.set(id, json);
+        }
+
+        const result = applyDriveChanges(dataRef.current, changes, rootFolderId, { contents, pendingPageIds: pending, tombstoneIds });
+        let nextTree = result.data;
+        if (result.indexChanged) {
+          try {
+            const indexData = await GoogleAPI.getIndexFile(rootFolderId);
+            if (indexData) nextTree = applyIndexOrder(nextTree, indexData);
+          } catch (error) {
+            log('SYNC', 'pull: index fetch failed', error?.message);
+          }
+        }
+        if (result.changed || result.indexChanged) {
+          setDataAndRef(() => nextTree);
+        }
+        for (const pageId of result.reupload) {
+          const found = findPageContext(nextTree, pageId);
+          if (found) enqueueOp({ type: 'patchPage', pageId }, `patch:${pageId}`);
+        }
+        for (const copyId of result.conflictCopies) {
+          const found = findPageContext(nextTree, copyId);
+          if (found) {
+            enqueueOp(
+              { type: 'ensurePageFile', pageId: copyId, tabId: found.tab.id, notebookId: found.notebook.id },
+              `page:${copyId}`
+            );
+          }
+        }
+        if (result.conflictCopies.length) {
+          showNotificationRef.current?.('A page changed on another device; the other version was saved as a conflict copy.', 'info');
+        } else if (result.reupload.length) {
+          showNotificationRef.current?.('Merged changes from another device.', 'info');
+        }
+        if (result.reupload.length || result.conflictCopies.length) {
+          refreshUnsynced();
+        }
+      }
+      localStorage.setItem(key, newPageToken);
+      setSyncStatus((prev) => ({ ...prev, lastPullTime: Date.now() }));
+    } catch (error) {
+      log('ERROR', 'pull failed', error);
+      if (isAuthError(error)) {
+        const ok = await GoogleAPI.refreshAccessToken();
+        if (!ok) {
+          signInRequiredRef.current = true;
+          publishSyncStatus({ phase: 'signin-required', error: { message: 'Your Google session expired. Sign in again to keep syncing.', status: 401, retryAt: null } });
+        }
+      }
+    } finally {
+      pullLockRef.current = false;
+      // Anything the pull queued (re-uploads, conflict copies) goes out now.
+      if (hasPendingOps() && !workerLockRef.current) runWorkerRef.current?.();
+    }
+  }, [changesTokenKey, ensureChangesToken, setDataAndRef, publishSyncStatus, refreshUnsynced]);
+
+  const pullRef = useRef(pullFromDrive);
+  pullRef.current = pullFromDrive;
+
+  // ------------------------------------------------------------------
+  // Push: serial outbox worker
+  // ------------------------------------------------------------------
   const runWorker = useCallback(async () => {
-    if (workerLockRef.current) return;
-    if (!isAuthenticated || isLoadingAuth || !rootFolderRef.current || !hasInitialLoadCompleted) return;
+    if (workerLockRef.current || pullLockRef.current) {
+      pendingKickRef.current = true;
+      return;
+    }
+    if (!readyRef.current) return;
+    if (signInRequiredRef.current) {
+      publishSyncStatus({ phase: 'signin-required' });
+      return;
+    }
+    if (!isOnline()) {
+      publishSyncStatus({ phase: 'offline', error: null });
+      return;
+    }
 
     workerLockRef.current = true;
     setIsSyncing(true);
@@ -142,7 +301,6 @@ export function useGoogleDrive(data, setData, showNotification) {
         if (!op) {
           backoffRef.current = 1000;
           const syncedAt = Date.now();
-          localStorage.setItem('strata_last_synced_hash', JSON.stringify(dataRef.current?.notebooks || []));
           setLastSyncTime(syncedAt);
           publishSyncStatus({
             phase: 'idle',
@@ -152,12 +310,17 @@ export function useGoogleDrive(data, setData, showNotification) {
           });
           break;
         }
+        if (!isOnline()) {
+          publishSyncStatus({ phase: 'offline', completed: completedRef.current, error: null });
+          break;
+        }
         publishSyncStatus({ phase: 'syncing', completed: completedRef.current, error: null });
         try {
           await processSyncOp(op, {
             dataRef,
             setDataAndRef,
             rootFolderId: rootFolderRef.current,
+            notify: (message, type) => showNotificationRef.current?.(message, type),
           });
           completedRef.current += 1;
           backoffRef.current = 1000;
@@ -174,6 +337,26 @@ export function useGoogleDrive(data, setData, showNotification) {
             await new Promise((r) => setTimeout(r, 500));
             continue;
           }
+
+          if (isAuthError(error)) {
+            log('SYNC', 'auth error, refreshing token');
+            const ok = await GoogleAPI.refreshAccessToken();
+            if (ok) continue; // same op, fresh token
+            signInRequiredRef.current = true;
+            publishSyncStatus({
+              phase: 'signin-required',
+              completed: completedRef.current,
+              error: { message: 'Your Google session expired. Sign in again to keep syncing.', status: 401, retryAt: null },
+            });
+            break;
+          }
+
+          if (!isOnline() || isNetworkError(error)) {
+            log('SYNC', 'network unavailable, pausing sync');
+            publishSyncStatus({ phase: 'offline', completed: completedRef.current, error: null });
+            break;
+          }
+
           log('ERROR', 'sync op failed', error);
           const delay = backoffRef.current;
           backoffRef.current = Math.min(backoffRef.current * 2, 30000);
@@ -183,13 +366,13 @@ export function useGoogleDrive(data, setData, showNotification) {
             completed: completedRef.current,
             error: {
               message: GoogleAPI.getDriveErrorMessage(error),
-              status: error.status || error.result?.error?.code || null,
+              status: errorStatus(error),
               retryAt: Date.now() + delay,
             },
           });
           workerTimerRef.current = setTimeout(() => {
             workerLockRef.current = false;
-            runWorker();
+            runWorkerRef.current?.();
           }, delay);
           return;
         }
@@ -201,13 +384,21 @@ export function useGoogleDrive(data, setData, showNotification) {
         refreshUnsynced();
         if (pendingKickRef.current) {
           pendingKickRef.current = false;
-          runWorker();
+          runWorkerRef.current?.();
+        } else if (pendingPullRef.current) {
+          pendingPullRef.current = false;
+          pullRef.current?.({ reason: 'deferred' });
         }
       }
     }
-  }, [isAuthenticated, isLoadingAuth, hasInitialLoadCompleted, setDataAndRef, refreshUnsynced, publishSyncStatus]);
+  }, [setDataAndRef, refreshUnsynced, publishSyncStatus]);
+  runWorkerRef.current = runWorker;
 
-  const kickWorker = useCallback(() => {
+  /**
+   * Schedule the worker. Content edits wait for typing to settle; structural
+   * changes go out almost immediately.
+   */
+  const kickWorker = useCallback((delay = STRUCTURE_KICK_DELAY_MS) => {
     refreshUnsynced();
     if (workerLockRef.current) {
       pendingKickRef.current = true;
@@ -218,9 +409,18 @@ export function useGoogleDrive(data, setData, showNotification) {
       workerTimerRef.current = null;
     }
     workerTimerRef.current = setTimeout(() => {
-      runWorker();
-    }, 50);
-  }, [runWorker, refreshUnsynced]);
+      workerTimerRef.current = null;
+      runWorkerRef.current?.();
+    }, delay);
+  }, [refreshUnsynced]);
+
+  const flushNow = useCallback(() => {
+    if (workerTimerRef.current) {
+      clearTimeout(workerTimerRef.current);
+      workerTimerRef.current = null;
+    }
+    if (hasPendingOps()) runWorkerRef.current?.();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -228,7 +428,9 @@ export function useGoogleDrive(data, setData, showNotification) {
     };
   }, []);
 
-  // Initialize Google APIs and check auth status
+  // ------------------------------------------------------------------
+  // Auth
+  // ------------------------------------------------------------------
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -264,17 +466,20 @@ export function useGoogleDrive(data, setData, showNotification) {
     try {
       setIsLoadingAuth(true);
       const userInfo = await GoogleAPI.signIn();
+      signInRequiredRef.current = false;
       setIsAuthenticated(true);
       setUserEmail(userInfo.email);
       setUserName(userInfo.name || userInfo.given_name || userInfo.email);
       showNotification?.('Signed in successfully', 'success');
+      publishSyncStatus({ phase: 'idle', error: null });
+      kickWorker();
     } catch (error) {
       log('ERROR', 'Sign in error:', error);
       showNotification?.('Sign in failed', 'error');
     } finally {
       setIsLoadingAuth(false);
     }
-  }, [showNotification]);
+  }, [showNotification, publishSyncStatus, kickWorker]);
 
   const handleSignOut = useCallback(() => {
     log('SYNC', 'handleSignOut: installing guest sandbox');
@@ -287,6 +492,31 @@ export function useGoogleDrive(data, setData, showNotification) {
     showNotification?.('Signed out', 'info');
     window.location.reload();
   }, [showNotification]);
+
+  // Proactively refresh the access token while the tab is visible, so the
+  // worker rarely meets a 401 at all.
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    const tick = async () => {
+      if (document.visibilityState !== 'visible' || !isOnline()) return;
+      const expiry = GoogleAPI.getTokenExpiry();
+      if (!expiry || expiry - Date.now() > TOKEN_REFRESH_AHEAD_MS) return;
+      const ok = await GoogleAPI.refreshAccessToken();
+      if (ok) {
+        if (signInRequiredRef.current) {
+          signInRequiredRef.current = false;
+          publishSyncStatus({ phase: 'idle', error: null });
+          kickWorker();
+        }
+      } else if (Date.now() > expiry) {
+        signInRequiredRef.current = true;
+        publishSyncStatus({ phase: 'signin-required', error: { message: 'Your Google session expired. Sign in again to keep syncing.', status: 401, retryAt: null } });
+      }
+    };
+    const id = setInterval(tick, 60 * 1000);
+    tick();
+    return () => clearInterval(id);
+  }, [isAuthenticated, publishSyncStatus, kickWorker]);
 
   useEffect(() => {
     if (!isAuthenticated || isLoadingAuth) return;
@@ -303,8 +533,8 @@ export function useGoogleDrive(data, setData, showNotification) {
       } catch (error) {
         log('ERROR', 'Error initializing Drive sync:', error);
         publishSyncStatus({
-          phase: 'idle',
-          error: { message: GoogleAPI.getDriveErrorMessage(error) || 'Could not connect to Drive', status: error.status || error.result?.error?.code || null, retryAt: null },
+          phase: isOnline() ? 'idle' : 'offline',
+          error: { message: GoogleAPI.getDriveErrorMessage(error) || 'Could not connect to Drive', status: errorStatus(error), retryAt: null },
         });
       } finally {
         setIsSyncing(false);
@@ -314,6 +544,9 @@ export function useGoogleDrive(data, setData, showNotification) {
     initDriveSync();
   }, [isAuthenticated, isLoadingAuth, publishSyncStatus]);
 
+  // ------------------------------------------------------------------
+  // Enqueue helpers used by the app
+  // ------------------------------------------------------------------
   const persistSnapshot = useCallback((tree) => {
     const snapshot = tree || getLiveTree() || dataRef.current;
     if (!snapshot) return null;
@@ -361,6 +594,48 @@ export function useGoogleDrive(data, setData, showNotification) {
     }
   }, [hasInitialLoadCompleted, isAuthenticated, driveRootFolderId, kickWorker, enqueueStructureFromTree]);
 
+  // Pull loop: after boot, on focus/visibility/online, and on an interval while visible.
+  useEffect(() => {
+    if (!(hasInitialLoadCompleted && isAuthenticated && driveRootFolderId)) return undefined;
+    const pull = (reason) => pullRef.current?.({ reason });
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') pull('visible');
+      else {
+        persistNotebookData(getLiveTree() || dataRef.current);
+        flushNow();
+      }
+    };
+    const onOnline = () => {
+      publishSyncStatus({ phase: 'idle', error: null });
+      kickWorker();
+      pull('online');
+    };
+    const onOffline = () => publishSyncStatus({ phase: 'offline', error: null });
+    const onFocus = () => pull('focus');
+    const onPageHide = () => {
+      persistNotebookData(getLiveTree() || dataRef.current);
+      flushNow();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pagehide', onPageHide);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') pull('interval');
+    }, PULL_INTERVAL_MS);
+    const initial = setTimeout(() => pull('boot'), 2000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pagehide', onPageHide);
+      clearInterval(interval);
+      clearTimeout(initial);
+    };
+  }, [hasInitialLoadCompleted, isAuthenticated, driveRootFolderId, kickWorker, flushNow, publishSyncStatus]);
+
   const triggerStructureSync = useCallback((tree) => {
     const snapshot = persistSnapshot(tree);
     enqueueStructureFromTree(snapshot);
@@ -373,7 +648,7 @@ export function useGoogleDrive(data, setData, showNotification) {
       if (pageId) {
         enqueueOp({ type: 'patchPage', pageId }, `patch:${pageId}`);
       }
-      kickWorker();
+      kickWorker(CONTENT_KICK_DELAY_MS);
     },
     [persistSnapshot, kickWorker]
   );
@@ -484,59 +759,35 @@ export function useGoogleDrive(data, setData, showNotification) {
     if (!isAuthenticated || isLoadingAuth) return null;
 
     try {
-      const cacheKey = userEmail ? `strata-cache-${userEmail}` : null;
-      const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-
-      let cached = null;
-      if (cacheKey) {
-        const sessionCached = sessionStorage.getItem(cacheKey);
-        const localCached = localStorage.getItem(cacheKey);
-
-        if (sessionCached) {
-          try {
-            cached = JSON.parse(sessionCached);
-          } catch {
-            /* ignore */
-          }
-        }
-        if (!cached && localCached) {
-          try {
-            const parsed = JSON.parse(localCached);
-            const age = Date.now() - (parsed.timestamp || 0);
-            if (age < CACHE_MAX_AGE_MS && parsed.data) {
-              cached = parsed;
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        log('SYNC', 'loadFromDrive: cache check', { cacheKey, hasCached: !!cached, cachedNotebookCount: cached?.data?.notebooks?.length });
-      }
-
       const rootFolderId = await GoogleAPI.getOrCreateRootFolder();
+      rootFolderRef.current = rootFolderId;
       log('SYNC', 'loadFromDrive: root folder', { rootFolderId });
 
-      const driveData = await GoogleAPI.loadFromDriveStructure(rootFolderId);
+      // Take the changes cursor BEFORE listing so nothing written between the
+      // listing and the first pull can be missed.
+      try {
+        await ensureChangesToken();
+      } catch (error) {
+        log('SYNC', 'loadFromDrive: could not get changes token', error?.message);
+      }
+
+      // Pages already held locally at the same Drive modifiedTime are reused
+      // instead of downloaded again.
+      const knownPages = new Map();
+      for (const nb of dataRef.current?.notebooks || []) {
+        for (const tab of nb.tabs || []) {
+          for (const page of tab.pages || []) {
+            const fileId = isLinkPage(page) ? page.driveLinkFileId : page.driveFileId;
+            if (fileId && page.driveModifiedTime) knownPages.set(fileId, page);
+          }
+        }
+      }
+
+      const driveData = await GoogleAPI.loadFromDriveStructure(rootFolderId, { knownPages });
 
       if (driveData && driveData.notebooks) {
         log('SYNC', 'loadFromDrive: loaded from Drive', { notebookCount: driveData.notebooks.length });
-        const reconciled = reconcileData(driveData);
-        setDriveRootFolderId(rootFolderId);
-        if (cacheKey) {
-          const cacheEntry = { data: reconciled, timestamp: Date.now() };
-          try {
-            sessionStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
-            localStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
-          } catch {
-            /* quota or disabled */
-          }
-        }
-        return reconciled;
-      }
-
-      if (cached?.data) {
-        log('SYNC', 'loadFromDrive: using cached data', { notebookCount: cached.data.notebooks?.length });
-        const reconciled = reconcileData(cached.data);
+        const reconciled = { ...reconcileData(driveData), complete: driveData.complete !== false };
         setDriveRootFolderId(rootFolderId);
         return reconciled;
       }
@@ -546,12 +797,12 @@ export function useGoogleDrive(data, setData, showNotification) {
       return null;
     } catch (error) {
       log('ERROR', 'Error loading from Drive:', error);
-      if (error.message?.includes('Authentication')) {
+      if (isAuthError(error)) {
         showNotification?.('Authentication expired. Please sign in again.', 'error');
       }
-      return null;
+      throw error;
     }
-  }, [isAuthenticated, isLoadingAuth, userEmail, showNotification]);
+  }, [isAuthenticated, isLoadingAuth, showNotification, ensureChangesToken]);
 
   const markInitialLoadComplete = useCallback(() => {
     setHasInitialLoadCompleted(true);
@@ -589,13 +840,7 @@ export function useGoogleDrive(data, setData, showNotification) {
           }
           for (const pg of tab.pages || []) {
             if (pg.id === id) {
-              const fileId = isLinkPage(pg) ? pg.driveLinkFileId : pg.driveFileId;
-              if (fileId) {
-                enqueueOp(
-                  { type: 'rename', driveId: fileId, name: GoogleAPI.sanitizeFileName(pg.name) + '.json' },
-                  `rename:${fileId}`
-                );
-              }
+              // The page JSON write already carries the new file name; no separate rename op.
               triggerContentSync(id, currentData);
               return;
             }
@@ -609,23 +854,18 @@ export function useGoogleDrive(data, setData, showNotification) {
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       persistNotebookData(getLiveTree() || dataRef.current);
-      if (hasPendingOps()) {
+      // Only warn when signed in: guest edits live in localStorage and are not "unsynced".
+      if (readyRef.current && hasPendingOps()) {
+        flushNow();
         e.preventDefault();
         e.returnValue = 'You have unsynced changes. Please wait for sync to finish.';
       }
     };
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        persistNotebookData(getLiveTree() || dataRef.current);
-      }
-    };
     window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, []);
+  }, [flushNow]);
 
   return {
     isAuthenticated,
@@ -643,6 +883,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     handleSignIn,
     handleSignOut,
     loadFromDrive,
+    pullFromDrive,
     triggerStructureSync,
     triggerContentSync,
     syncSubtree,

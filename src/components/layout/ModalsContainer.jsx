@@ -7,7 +7,7 @@ import {
   createInitialData,
 } from '../../lib/constants';
 import { findBlockInRows, updatePageInData, COLOR_BG_CLASSES } from '../../lib/utils';
-import { collectDriveOnlyIds, mergeDriveWithLocal } from '../../lib/sync-merge';
+import { mergeDriveWithLocal } from '../../lib/sync-merge';
 import { clearGuestBaseline, pendingPageIds, persistNotebookData, tombstoneIdSet } from '../../lib/sync-outbox';
 import * as GoogleAPI from '../../lib/google-api';
 import * as emoji from 'node-emoji';
@@ -23,7 +23,7 @@ import {
   AlertCircle,
   FolderOpen,
 } from '../../components/icons';
-import { MapConfigPopup } from '../pages';
+import MapConfigPopup from '../pages/MapConfigPopup';
 import { useStrata } from '../../contexts/StrataContext';
 import { usePageContent } from '../../hooks/usePageContent';
 import { useBlockEditor } from '../../hooks/useBlockEditor';
@@ -67,9 +67,7 @@ export function ModalsContainer() {
     setActiveTabId,
     setActivePageId,
     setData,
-    triggerStructureSync,
     triggerContentSync,
-    queueDriveDelete,
     setActiveTabMenu,
     setItemToDelete,
     activeTabMenu,
@@ -127,7 +125,7 @@ export function ModalsContainer() {
       {/* Tab Settings Menu */}
       {activeTabMenu && (
         <div
-          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-3 z-[9999] tab-settings-menu"
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-3 z-[9999] strata-sheet tab-settings-menu"
           style={{ top: activeTabMenu.top, left: activeTabMenu.left }}
         >
           <div className="text-[10px] font-bold text-gray-400 uppercase mb-2">Section Color</div>
@@ -155,7 +153,7 @@ export function ModalsContainer() {
         const menuBlock = findBlockInRows(rowsForEditor, blockMenu.id);
         return menuBlock && (
           <div
-            className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] block-menu"
+            className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] strata-sheet block-menu"
             style={{ top: blockMenu.top, left: blockMenu.left }}
           >
             <div className="mb-2">
@@ -233,7 +231,7 @@ export function ModalsContainer() {
       {/* Icon Pickers */}
       {notebookIconPicker && (
         <div
-          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] notebook-icon-picker w-64"
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] strata-sheet notebook-icon-picker w-64"
           style={{ top: notebookIconPicker.top, left: notebookIconPicker.left }}
         >
           <input
@@ -264,7 +262,7 @@ export function ModalsContainer() {
 
       {tabIconPicker && (
         <div
-          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] tab-icon-picker w-64"
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] strata-sheet tab-icon-picker w-64"
           style={{ top: tabIconPicker.top, left: tabIconPicker.left }}
         >
           <input
@@ -295,7 +293,7 @@ export function ModalsContainer() {
 
       {pageIconPicker && (
         <div
-          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] page-icon-picker w-64"
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl rounded-lg p-2 z-[9999] strata-sheet page-icon-picker w-64"
           style={{ top: pageIconPicker.top, left: pageIconPicker.left }}
         >
           <input
@@ -429,52 +427,7 @@ export function ModalsContainer() {
                   </button>
                 </div>
               </>
-            ) : (
-              <>
-                <h3 className="font-bold text-xl mb-3 flex items-center gap-2 dark:text-white">
-                  <AlertCircle className="text-yellow-500" /> Offline Changes Detected
-                </h3>
-                <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed text-sm">
-                  We found local changes on this device that haven't been saved to Google Drive. Which version would you like to keep?
-                </p>
-                <div className="flex flex-col gap-3">
-                  <button
-                    onClick={() => {
-                      const extra = collectDriveOnlyIds(syncConflict.localData, syncConflict.driveData);
-                      if (extra.length) queueDriveDelete(extra);
-                      setData(syncConflict.localData);
-                      triggerStructureSync(syncConflict.localData);
-                      setSyncConflict(null);
-                    }}
-                    className="w-full text-left p-4 rounded-lg border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
-                  >
-                    <div className="font-bold text-blue-700 dark:text-blue-300 mb-1">Keep Local Changes</div>
-                    <div className="text-xs text-blue-600 dark:text-blue-400">Overwrites Google Drive with the unsynced data currently on this device.</div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setData(syncConflict.driveData);
-                      localStorage.setItem('strata_last_synced_hash', JSON.stringify(syncConflict.driveData.notebooks));
-                      setSyncConflict(null);
-
-                      if (syncConflict.driveData.notebooks?.length > 0) {
-                        const nb = syncConflict.driveData.notebooks[0];
-                        setActiveNotebookId(nb.id);
-                        const tab = nb.tabs[0];
-                        if (tab) {
-                          setActiveTabId(tab.id);
-                          setActivePageId(tab.pages[0]?.id || null);
-                        }
-                      }
-                    }}
-                    className="w-full text-left p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    <div className="font-bold text-gray-700 dark:text-gray-300 mb-1">Discard Local & Load from Drive</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Reverts to the last safely synced state from Google Drive.</div>
-                  </button>
-                </div>
-              </>
-            )}
+            ) : null}
           </div>
         </div>
       )}

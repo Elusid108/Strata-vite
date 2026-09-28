@@ -23,7 +23,8 @@ export function useHistory(data, setData, showNotification) {
   const saveToHistory = useCallback((newData) => {
     if (isUndoRedoRef.current) return;
     
-    const dataToSave = newData ? newData : JSON.parse(JSON.stringify(data));
+    // Tree updates are immutable everywhere, so snapshots can share structure.
+    const dataToSave = newData ? newData : data;
     
     setHistory(prev => {
       // Remove any future states if we're not at the end

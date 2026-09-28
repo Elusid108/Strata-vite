@@ -21,7 +21,13 @@ export const COLOR_BG_CLASSES = {
  * Generate a random alphanumeric ID
  * @returns {string} A 9-character random ID
  */
-export const generateId = () => Math.random().toString(36).substr(2, 9);
+export const generateId = () => {
+  // Collision-safe across devices: 96 bits from crypto when available.
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+  }
+  return Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
+};
 
 /**
  * Get the next tab color by cycling through the COLORS array
@@ -103,7 +109,7 @@ export const getDropIndicatorClass = (position) => {
  * @param {Function} updater - Function that receives page and returns updated page
  * @returns {Object} New data object with the updated page
  */
-export const updatePageInData = (data, { notebookId, tabId, pageId }, updater) => {
+export const updatePageInData = (data, { notebookId, tabId, pageId }, updater, { touch = true } = {}) => {
   return {
     ...data,
     notebooks: data.notebooks.map(nb =>
@@ -112,14 +118,32 @@ export const updatePageInData = (data, { notebookId, tabId, pageId }, updater) =
         tabs: nb.tabs.map(tab =>
           tab.id !== tabId ? tab : {
             ...tab,
-            pages: tab.pages.map(p =>
-              p.id !== pageId ? p : updater(p)
-            )
+            pages: tab.pages.map(p => {
+              if (p.id !== pageId) return p;
+              const next = updater(p);
+              // Every user edit bumps modifiedAt so the boot merge and the
+              // conflict resolver can tell "edited here" from "stale copy".
+              return touch && next !== p ? { ...next, modifiedAt: Date.now() } : next;
+            })
           }
         )
       }
     )
   };
+};
+
+/**
+ * Like updatePageInData but locates the page by id alone (any notebook/tab).
+ */
+export const updatePageById = (data, pageId, updater, opts) => {
+  for (const nb of data?.notebooks || []) {
+    for (const tab of nb.tabs || []) {
+      if ((tab.pages || []).some((p) => p.id === pageId)) {
+        return updatePageInData(data, { notebookId: nb.id, tabId: tab.id, pageId }, updater, opts);
+      }
+    }
+  }
+  return data;
 };
 
 /**

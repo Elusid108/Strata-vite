@@ -16,6 +16,10 @@ import { mergeDriveWithLocal } from '../lib/sync-merge';
 /**
  * Hook for loading data from Drive or localStorage on mount.
  * Restores last viewed notebook/tab/page from localStorage when possible.
+ *
+ * Signed-in boot is stale-while-revalidate: if this device already holds a
+ * Drive-backed tree, it renders immediately and the Drive listing is merged
+ * in the background. The full-screen loader only appears on a first sign-in.
  */
 export function useDataLoader() {
   const {
@@ -76,11 +80,39 @@ export function useDataLoader() {
         setActiveFromData(tree);
       };
 
+      const mergeOpts = () => ({ tombstoneIds: tombstoneIdSet(), pendingPageIds: pendingPageIds() });
+
       if (isAuthenticated) {
         beginAuthenticatedLoad();
+        const localRaw = loadFromLocalStorage();
+        const hasDriveTree = localRaw?.notebooks?.length > 0 && !isGuestTree(localRaw);
+
+        if (hasDriveTree) {
+          // Instant render from the local copy, then reconcile with Drive.
+          log('SYNC', 'loadData: rendering cached Drive tree, revalidating in background');
+          clearGuestBaseline();
+          applyTree(localRaw);
+          markInitialLoadComplete();
+          try {
+            const driveData = await loadFromDrive();
+            if (driveData?.notebooks) {
+              setData((prev) => {
+                const merged = mergeDriveWithLocal(prev, driveData, mergeOpts());
+                persistNotebookData(merged);
+                return merged;
+              });
+              enqueueRecoveryPatches(localRaw, driveData, triggerContentSyncRef.current);
+            }
+          } catch (error) {
+            console.error('Error revalidating from Drive:', error);
+            showNotification('Could not reach Google Drive. Working from the local copy.', 'error');
+          }
+          return;
+        }
+
+        // First sign-in on this device (or a guest sandbox): wait for Drive.
         let awaitingGuestChoice = false;
         try {
-          const localRaw = loadFromLocalStorage();
           const driveData = await loadFromDrive();
 
           if (isGuestTree(localRaw) && guestWorkspaceHasEdits(localRaw)) {
@@ -91,33 +123,14 @@ export function useDataLoader() {
           }
 
           clearGuestBaseline();
-
-          if (!localRaw?.notebooks?.length || isGuestTree(localRaw)) {
-            const next = driveData?.notebooks?.length ? driveData : createInitialData();
-            applyTree(next);
-          } else {
-            const merged = mergeDriveWithLocal(localRaw, driveData, {
-              tombstoneIds: tombstoneIdSet(),
-              pendingPageIds: pendingPageIds(),
-            });
-            const hasTree = merged?.notebooks?.length > 0;
-            if (hasTree) {
-              applyTree(merged);
-              enqueueRecoveryPatches(localRaw, driveData, triggerContentSyncRef.current);
-            } else if (driveData?.notebooks?.length) {
-              applyTree(driveData);
-            } else {
-              applyTree(createInitialData());
-            }
-          }
+          const next = driveData?.notebooks?.length ? driveData : createInitialData();
+          applyTree(next);
         } catch (error) {
           console.error('Error loading from Drive:', error);
           showNotification('Failed to load from Drive. Using local data as fallback.', 'error');
           log('SYNC', 'loadData: Drive failed, fallback to localStorage');
           const localData = loadFromLocalStorage();
-          if (localData?.notebooks?.length > 0 && !isGuestTree(localData)) {
-            applyTree(localData);
-          } else if (localData?.notebooks?.length > 0) {
+          if (localData?.notebooks?.length > 0) {
             applyTree(localData);
           } else {
             log('SYNC', 'loadData: localStorage empty, using createInitialData');
@@ -159,6 +172,10 @@ export function useDataLoader() {
   ]);
 }
 
+/**
+ * Pages edited locally after the version Drive holds are queued for upload.
+ * (Only meaningful once modifiedAt is stamped locally, which every edit now does.)
+ */
 function enqueueRecoveryPatches(localData, driveData, triggerContentSync) {
   if (!localData?.notebooks || !driveData?.notebooks || !triggerContentSync) return;
   const drivePages = new Map();

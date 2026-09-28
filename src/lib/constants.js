@@ -1,5 +1,6 @@
 // --- App Version ---
-export const APP_VERSION = "3.6.1";
+// Injected from package.json by vite.config.js (falls back for tests).
+export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : "0.0.0-dev";
 
 // --- Debug ---
 export const DEBUG_SYNC = import.meta.env.VITE_STRATA_DEBUG_SYNC === 'true';

@@ -8,12 +8,32 @@ import {
   createDatabasePage
 } from '../lib/page-factories';
 import { parseEmbedUrl } from '../lib/embed-utils';
+import { isLinkPage } from '../lib/sync-merge';
+import { moveNotebook, moveTab, movePage } from '../lib/nav-move';
+import { useViewport } from './useViewport';
 import { useStrata } from '../contexts/StrataContext';
 import { usePageContent } from './usePageContent';
+
+const addPageToTab = (base, notebookId, tabId, newPage) => ({
+  ...base,
+  notebooks: base.notebooks.map((nb) =>
+    nb.id !== notebookId
+      ? nb
+      : {
+          ...nb,
+          tabs: nb.tabs.map((tab) => (tab.id !== tabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })),
+        }
+  ),
+});
 
 /**
  * Hook for high-level CRUD operations on notebooks, tabs, and pages.
  * Consumes useStrata() and usePageContent() for data, sync, and navigation.
+ *
+ * Every mutation is expressed as a pure `apply(base) => next` function that is
+ * handed to React as a functional updater (so it composes with concurrent
+ * updates from the sync engine) and also applied to the current snapshot to
+ * produce the tree we hand to the sync layer for immediate persistence.
  */
 export function useAppActions() {
   const {
@@ -53,9 +73,19 @@ export function useAppActions() {
     setTabIconPicker,
     setPageIconPicker,
     setIconSearchTerm,
+    setMobilePane,
   } = useStrata();
 
   const { flushAndClearSync } = usePageContent();
+  const { isMobile } = useViewport();
+
+  const commit = useCallback(
+    (apply) => {
+      setData(apply);
+      return apply(data);
+    },
+    [setData, data]
+  );
 
   const selectNotebook = useCallback(
     (notebookId) => {
@@ -110,6 +140,7 @@ export function useAppActions() {
       setEditingPageId(null);
       setEditingTabId(null);
       setEditingNotebookId(null);
+      if (isMobile) setMobilePane('editor');
 
       setData((prev) => ({
         ...prev,
@@ -123,7 +154,7 @@ export function useAppActions() {
         ),
       }));
     },
-    [flushAndClearSync, setData, activeNotebookId, activeTabId, data.notebooks, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId]
+    [flushAndClearSync, setData, activeNotebookId, activeTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, isMobile, setMobilePane]
   );
 
   const getStarredPages = useCallback(() => {
@@ -161,8 +192,7 @@ export function useAppActions() {
     const newPage = createDefaultPage();
     const newTab = { id: generateId(), name: 'New Tab', icon: '📋', color: COLORS[0].name, pages: [newPage], activePageId: newPage.id };
     const newNb = { id: generateId(), name: 'New Notebook', icon: '📓', tabs: [newTab], activeTabId: newTab.id };
-    const newData = { ...data, notebooks: [...data.notebooks, newNb] };
-    setData(newData);
+    const newData = commit((base) => ({ ...base, notebooks: [...base.notebooks, newNb] }));
     setActiveNotebookId(newNb.id);
     setActiveTabId(newTab.id);
     setActivePageId(newPage.id);
@@ -172,7 +202,7 @@ export function useAppActions() {
     setCreationFlow({ notebookId: newNb.id, tabId: newTab.id, pageId: newPage.id });
     showNotification('Notebook created', 'success');
     syncSubtree(newData, { notebookId: newNb.id, tabId: newTab.id, pageId: newPage.id });
-  }, [saveToHistory, data, setData, showNotification, syncSubtree, setActiveNotebookId, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setCreationFlow]);
+  }, [saveToHistory, commit, showNotification, syncSubtree, setActiveNotebookId, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setCreationFlow]);
 
   const addTab = useCallback(async () => {
     if (!activeNotebookId) return;
@@ -180,11 +210,10 @@ export function useAppActions() {
     const activeNotebook = data.notebooks.find((nb) => nb.id === activeNotebookId);
     const newPage = createDefaultPage();
     const newTab = { id: generateId(), name: 'New Tab', icon: '📋', color: getNextTabColor(activeNotebook?.tabs), pages: [newPage], activePageId: newPage.id };
-    const newData = {
-      ...data,
-      notebooks: data.notebooks.map((nb) => (nb.id === activeNotebookId ? { ...nb, tabs: [...nb.tabs, newTab], activeTabId: newTab.id } : nb)),
-    };
-    setData(newData);
+    const newData = commit((base) => ({
+      ...base,
+      notebooks: base.notebooks.map((nb) => (nb.id === activeNotebookId ? { ...nb, tabs: [...nb.tabs, newTab], activeTabId: newTab.id } : nb)),
+    }));
     setActiveTabId(newTab.id);
     setActivePageId(newPage.id);
     setEditingPageId(null);
@@ -192,80 +221,31 @@ export function useAppActions() {
     setEditingNotebookId(null);
     showNotification('Section created', 'success');
     syncSubtree(newData, { notebookId: activeNotebookId, tabId: newTab.id, pageId: newPage.id });
-  }, [activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId]);
+  }, [activeNotebookId, saveToHistory, data.notebooks, commit, showNotification, syncSubtree, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId]);
 
-  const addPage = useCallback(async () => {
-    if (!activeTabId) return;
-    saveToHistory();
-    const newPage = createDefaultPage();
-    const newData = {
-      ...data,
-      notebooks: data.notebooks.map((nb) =>
-        nb.id !== activeNotebookId
-          ? nb
-          : {
-              ...nb,
-              tabs: nb.tabs.map((tab) => (tab.id !== activeTabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })),
-            }
-      ),
-    };
-    setData(newData);
-    setActivePageId(newPage.id);
-    setEditingPageId(null);
-    setEditingTabId(null);
-    setEditingNotebookId(null);
-    setShouldFocusTitle(true);
-    showNotification('Page created', 'success');
-    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setShouldFocusTitle]);
+  const addPageOfType = useCallback(
+    (newPage, label, { focusTitle = false } = {}) => {
+      if (!activeTabId) return;
+      saveToHistory();
+      const newData = commit((base) => addPageToTab(base, activeNotebookId, activeTabId, newPage));
+      setActivePageId(newPage.id);
+      if (isMobile) setMobilePane('editor');
+      if (focusTitle) {
+        setEditingPageId(null);
+        setEditingTabId(null);
+        setEditingNotebookId(null);
+        setShouldFocusTitle(true);
+      }
+      showNotification(label, 'success');
+      syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+    },
+    [activeTabId, activeNotebookId, saveToHistory, commit, showNotification, syncSubtree, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setShouldFocusTitle, isMobile, setMobilePane]
+  );
 
-  const addCanvasPage = useCallback(() => {
-    if (!activeTabId) return;
-    saveToHistory();
-    const newPage = createCanvasPage();
-    const newData = {
-      ...data,
-      notebooks: data.notebooks.map((nb) =>
-        nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== activeTabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })) }
-      ),
-    };
-    setData(newData);
-    setActivePageId(newPage.id);
-    showNotification('Canvas page created', 'success');
-    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]);
-
-  const addDatabasePage = useCallback(() => {
-    if (!activeTabId) return;
-    saveToHistory();
-    const newPage = createDatabasePage();
-    const newData = {
-      ...data,
-      notebooks: data.notebooks.map((nb) =>
-        nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== activeTabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })) }
-      ),
-    };
-    setData(newData);
-    setActivePageId(newPage.id);
-    showNotification('Database page created', 'success');
-    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]);
-
-  const addCodePage = useCallback(() => {
-    if (!activeTabId) return;
-    saveToHistory();
-    const newPage = createCodePage();
-    const newData = {
-      ...data,
-      notebooks: data.notebooks.map((nb) =>
-        nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== activeTabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })) }
-      ),
-    };
-    setData(newData);
-    setActivePageId(newPage.id);
-    showNotification('Code page created', 'success');
-    syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
-  }, [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]);
+  const addPage = useCallback(() => addPageOfType(createDefaultPage(), 'Page created', { focusTitle: true }), [addPageOfType]);
+  const addCanvasPage = useCallback(() => addPageOfType(createCanvasPage(), 'Canvas page created'), [addPageOfType]);
+  const addDatabasePage = useCallback(() => addPageOfType(createDatabasePage(), 'Database page created'), [addPageOfType]);
+  const addCodePage = useCallback(() => addPageOfType(createCodePage(), 'Code page created'), [addPageOfType]);
 
   const addEmbedPageFromUrl = useCallback(
     (rawUrl) => {
@@ -275,7 +255,6 @@ export function useAppActions() {
         showNotification('Could not parse Google Drive, PDF, or Web Board URL', 'error');
         return false;
       }
-      saveToHistory();
       const pageName = parsed.isGoogleService
         ? (parsed.type === 'site' ? 'Google Site' : `Google ${parsed.typeName}`)
         : parsed.typeName;
@@ -290,20 +269,12 @@ export function useAppActions() {
         ...(parsed.type === 'pdf' && !parsed.fileId && !parsed.originalUrl && { originalUrl: rawUrl }),
         icon: parsed.icon,
         createdAt: Date.now(),
+        modifiedAt: Date.now(),
       };
-      const newData = {
-        ...data,
-        notebooks: data.notebooks.map((nb) =>
-          nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== activeTabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })) }
-        ),
-      };
-      setData(newData);
-      setActivePageId(newPage.id);
-      showNotification(`${pageName} added`, 'success');
-      syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+      addPageOfType(newPage, `${pageName} added`);
       return true;
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]
+    [activeTabId, showNotification, addPageOfType]
   );
 
   const addGooglePage = useCallback(
@@ -368,7 +339,6 @@ export function useAppActions() {
       else if (pageType === 'vid') embedUrl = `https://vids.google.com/watch/${file.id}`;
       else embedUrl = `https://drive.google.com/file/d/${file.id}/preview`;
 
-      saveToHistory();
       const newPage = {
         id: generateId(),
         name: file.name || `Google ${typeName}`,
@@ -379,130 +349,114 @@ export function useAppActions() {
         mimeType: file.mimeType,
         icon,
         createdAt: Date.now(),
+        modifiedAt: Date.now(),
       };
-      const newData = {
-        ...data,
-        notebooks: data.notebooks.map((nb) =>
-          nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== activeTabId ? tab : { ...tab, pages: [...tab.pages, newPage], activePageId: newPage.id })) }
-        ),
-      };
-      setData(newData);
-      setActivePageId(newPage.id);
-      showNotification(`${file.name || 'Google ' + typeName} added`, 'success');
-      syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+      addPageOfType(newPage, `${file.name || 'Google ' + typeName} added`);
     },
-    [activeTabId, activeNotebookId, saveToHistory, data, setData, showNotification, syncSubtree, setActivePageId]
+    [activeTabId, addPageOfType]
   );
 
   const executeDelete = useCallback(
     async (type, id) => {
       saveToHistory();
-      const newData = JSON.parse(JSON.stringify(data));
-      let nextId = null;
       const driveIdsToDelete = [];
-      const getPageDeleteId = (page) => {
-        const isEmbed = ['doc', 'sheet', 'slide', 'form', 'drawing', 'vid', 'pdf', 'site', 'script', 'drive', 'lucidchart', 'miro', 'drawio'].includes(page.type);
-        return page.driveLinkFileId || (!isEmbed ? page.driveFileId : null);
-      };
+      // Link pages point at a file the user owns elsewhere in Drive (Doc, My Map, PDF...).
+      // Only the Strata link JSON may ever be trashed, never the linked file itself.
+      const getPageDeleteId = (page) => (isLinkPage(page) ? page.driveLinkFileId || null : page.driveFileId || null);
       const collectDriveIds = (item, itemType) => {
         if (itemType === 'notebook') {
           if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
-          for (const tab of item.tabs || []) {
-            if (tab.driveFolderId) driveIdsToDelete.push(tab.driveFolderId);
-            for (const page of tab.pages || []) {
-              const delId = getPageDeleteId(page);
-              if (delId) driveIdsToDelete.push(delId);
-            }
-          }
+          for (const tab of item.tabs || []) collectDriveIds(tab, 'tab');
         } else if (itemType === 'tab') {
           if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
-          for (const page of item.pages || []) {
-            const delId = getPageDeleteId(page);
-            if (delId) driveIdsToDelete.push(delId);
-          }
+          for (const page of item.pages || []) collectDriveIds(page, 'page');
         } else if (itemType === 'page') {
           const delId = getPageDeleteId(item);
           if (delId) driveIdsToDelete.push(delId);
         }
       };
 
+      // Phase 1: decide what to trash and what becomes active, from the current snapshot.
+      let nextId = null;
       if (type === 'notebook') {
-        const notebook = newData.notebooks.find((n) => n.id === id);
+        const idx = data.notebooks.findIndex((n) => n.id === id);
+        const notebook = data.notebooks[idx];
         if (notebook) collectDriveIds(notebook, 'notebook');
-        const idx = newData.notebooks.findIndex((n) => n.id === id);
         if (activeNotebookId === id) {
-          if (idx < newData.notebooks.length - 1) nextId = newData.notebooks[idx + 1].id;
-          else if (idx > 0) nextId = newData.notebooks[idx - 1].id;
-        }
-        newData.notebooks = newData.notebooks.filter((n) => n.id !== id);
-        if (activeNotebookId === id) {
-          setActiveNotebookId(nextId);
-          if (nextId) {
-            const nextNb = newData.notebooks.find((n) => n.id === nextId);
-            if (nextNb?.tabs?.length > 0) {
-              const tabToSelect = nextNb.activeTabId || nextNb.tabs[0]?.id;
-              if (tabToSelect) {
-                setActiveTabId(tabToSelect);
-                const tabObj = nextNb.tabs.find((t) => t.id === tabToSelect);
-                setActivePageId(tabObj?.activePageId || tabObj?.pages[0]?.id || null);
-              } else {
-                setActiveTabId(null);
-                setActivePageId(null);
-              }
-            } else {
-              setActiveTabId(null);
-              setActivePageId(null);
-            }
-          } else {
-            setActiveTabId(null);
-            setActivePageId(null);
-          }
+          if (idx < data.notebooks.length - 1) nextId = data.notebooks[idx + 1].id;
+          else if (idx > 0) nextId = data.notebooks[idx - 1].id;
         }
       } else {
-        for (const nb of newData.notebooks) {
-          if (nb.id !== activeNotebookId) continue;
-          if (type === 'tab') {
-            const tab = nb.tabs.find((t) => t.id === id);
-            if (tab) collectDriveIds(tab, 'tab');
-            const idx = nb.tabs.findIndex((t) => t.id === id);
-            if (activeTabId === id) {
-              if (idx < nb.tabs.length - 1) nextId = nb.tabs[idx + 1].id;
-              else if (idx > 0) nextId = nb.tabs[idx - 1].id;
-            }
-            nb.tabs = nb.tabs.filter((t) => t.id !== id);
-            if (activeTabId === id) selectTab(nextId);
-          } else if (type === 'page') {
-            for (const tab of nb.tabs) {
-              if (tab.id !== activeTabId) continue;
-              const page = tab.pages.find((p) => p.id === id);
-              if (page) collectDriveIds(page, 'page');
-              const idx = tab.pages.findIndex((p) => p.id === id);
-              if (activePageId === id) {
-                if (idx < tab.pages.length - 1) nextId = tab.pages[idx + 1].id;
-                else if (idx > 0) nextId = tab.pages[idx - 1].id;
-              }
-              tab.pages = tab.pages.filter((p) => p.id !== id);
-              if (activePageId === id) {
-                selectPage(nextId);
-                if (nextId) shouldFocusPageRef.current = true;
-              }
+        const nb = data.notebooks.find((n) => n.id === activeNotebookId);
+        if (nb && type === 'tab') {
+          const idx = nb.tabs.findIndex((t) => t.id === id);
+          const tab = nb.tabs[idx];
+          if (tab) collectDriveIds(tab, 'tab');
+          if (activeTabId === id) {
+            if (idx < nb.tabs.length - 1) nextId = nb.tabs[idx + 1].id;
+            else if (idx > 0) nextId = nb.tabs[idx - 1].id;
+          }
+        } else if (nb && type === 'page') {
+          const tab = nb.tabs.find((t) => t.id === activeTabId);
+          if (tab) {
+            const idx = tab.pages.findIndex((p) => p.id === id);
+            const page = tab.pages[idx];
+            if (page) collectDriveIds(page, 'page');
+            if (activePageId === id) {
+              if (idx < tab.pages.length - 1) nextId = tab.pages[idx + 1].id;
+              else if (idx > 0) nextId = tab.pages[idx - 1].id;
             }
           }
         }
       }
 
+      // Phase 2: pure structural removal, applied functionally.
+      const apply = (base) => {
+        const next = JSON.parse(JSON.stringify(base));
+        if (type === 'notebook') {
+          next.notebooks = next.notebooks.filter((n) => n.id !== id);
+        } else if (type === 'tab') {
+          next.notebooks.forEach((nb) => {
+            nb.tabs = nb.tabs.filter((t) => t.id !== id);
+          });
+        } else if (type === 'page') {
+          next.notebooks.forEach((nb) => {
+            nb.tabs.forEach((tab) => {
+              tab.pages = tab.pages.filter((p) => p.id !== id);
+            });
+          });
+          if (Array.isArray(next.favoritesOrder)) next.favoritesOrder = next.favoritesOrder.filter((pid) => pid !== id);
+        }
+        return next;
+      };
+      const newData = commit(apply);
+
+      // Phase 3: selection follow-up.
+      if (type === 'notebook' && activeNotebookId === id) {
+        setActiveNotebookId(nextId);
+        const nextNb = nextId ? newData.notebooks.find((n) => n.id === nextId) : null;
+        const tabToSelect = nextNb?.activeTabId || nextNb?.tabs?.[0]?.id || null;
+        setActiveTabId(tabToSelect);
+        const tabObj = tabToSelect ? nextNb.tabs.find((t) => t.id === tabToSelect) : null;
+        setActivePageId(tabObj?.activePageId || tabObj?.pages?.[0]?.id || null);
+      } else if (type === 'tab' && activeTabId === id) {
+        selectTab(nextId);
+      } else if (type === 'page' && activePageId === id) {
+        selectPage(nextId);
+        if (nextId) shouldFocusPageRef.current = true;
+      }
+
       if (driveIdsToDelete.length > 0) queueDriveDelete(driveIdsToDelete, newData);
-      setData(newData);
+      else syncIndex(newData);
       if (itemToDelete?.id === id) setItemToDelete(null);
       if (activeTabMenu?.id === id) setActiveTabMenu(null);
       if (selectedBlockId === id) setSelectedBlockId(null);
       showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted`, 'success');
-      if (driveIdsToDelete.length === 0) syncIndex(newData);
     },
     [
       saveToHistory,
       data,
-      setData,
+      commit,
       activeNotebookId,
       activeTabId,
       activePageId,
@@ -531,19 +485,23 @@ export function useAppActions() {
 
   const updateLocalName = useCallback(
     (type, id, newName) => {
-      setData((prev) => {
-        const next = JSON.parse(JSON.stringify(prev));
-        next.notebooks.forEach((nb) => {
-          if (type === 'notebook' && nb.id === id) nb.name = newName;
-          nb.tabs.forEach((tab) => {
-            if (type === 'tab' && tab.id === id) tab.name = newName;
-            tab.pages.forEach((pg) => {
-              if (pg.id === id) pg.name = newName;
-            });
-          });
-        });
-        return next;
-      });
+      setData((prev) => ({
+        ...prev,
+        notebooks: prev.notebooks.map((nb) => {
+          if (type === 'notebook' && nb.id === id) return { ...nb, name: newName };
+          return {
+            ...nb,
+            tabs: nb.tabs.map((tab) => {
+              if (type === 'tab' && tab.id === id) return { ...tab, name: newName };
+              if (type !== 'page') return tab;
+              return {
+                ...tab,
+                pages: tab.pages.map((pg) => (pg.id === id ? { ...pg, name: newName, modifiedAt: Date.now() } : pg)),
+              };
+            }),
+          };
+        }),
+      }));
     },
     [setData]
   );
@@ -569,49 +527,66 @@ export function useAppActions() {
       if (!dragDataRaw) return;
       const dragData = JSON.parse(dragDataRaw);
 
-      saveToHistory();
-      const newData = JSON.parse(JSON.stringify(data));
-      let changed = false;
-      let driveMoveTask = null; // Track cross-folder moves
+      // Pure move: returns { next, changed, driveMoveTask } for any base tree.
+      const run = (base) => {
+        const next = JSON.parse(JSON.stringify(base));
+        let changed = false;
+        let driveMoveTask = null;
 
-      const sourceNb = newData.notebooks.find((n) => n.id === dragData.sourceNotebookId);
-      const sourceTab = sourceNb?.tabs.find((t) => t.id === dragData.sourceTabId);
+        const sourceNb = next.notebooks.find((n) => n.id === dragData.sourceNotebookId);
+        const sourceTab = sourceNb?.tabs.find((t) => t.id === dragData.sourceTabId);
 
-      if (dragData.type === 'notebook' && dropType === 'notebook') {
-        if (dragData.index !== targetIndex) {
-          const [movedNb] = newData.notebooks.splice(dragData.index, 1);
-          newData.notebooks.splice(targetIndex, 0, movedNb);
-          changed = true;
-        }
-      } else if (dragData.type === 'tab') {
-        if (dropType === 'tab') {
-          const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
-          if (sourceNb && targetNb) {
-            const [movedTab] = sourceNb.tabs.splice(dragData.index, 1);
-            targetNb.tabs.splice(targetIndex, 0, movedTab);
+        if (dragData.type === 'notebook' && dropType === 'notebook') {
+          const fromIdx = next.notebooks.findIndex((n) => n.id === dragData.id);
+          if (fromIdx >= 0 && fromIdx !== targetIndex) {
+            const [movedNb] = next.notebooks.splice(fromIdx, 1);
+            next.notebooks.splice(targetIndex, 0, movedNb);
             changed = true;
-            if (sourceNb.id !== targetNb.id && movedTab.driveFolderId && targetNb.driveFolderId && sourceNb.driveFolderId) {
-              driveMoveTask = { itemId: movedTab.driveFolderId, newParentId: targetNb.driveFolderId, oldParentId: sourceNb.driveFolderId };
+          }
+        } else if (dragData.type === 'tab') {
+          const fromIdx = sourceNb ? sourceNb.tabs.findIndex((t) => t.id === dragData.id) : -1;
+          if (dropType === 'tab') {
+            const targetNb = next.notebooks.find((n) => n.id === activeNotebookId);
+            if (sourceNb && targetNb && fromIdx >= 0) {
+              const [movedTab] = sourceNb.tabs.splice(fromIdx, 1);
+              targetNb.tabs.splice(targetIndex, 0, movedTab);
+              changed = true;
+              if (sourceNb.id !== targetNb.id && movedTab.driveFolderId && targetNb.driveFolderId && sourceNb.driveFolderId) {
+                driveMoveTask = { itemId: movedTab.driveFolderId, newParentId: targetNb.driveFolderId, oldParentId: sourceNb.driveFolderId };
+              }
+            }
+          } else if (dropType === 'notebook') {
+            const targetNb = next.notebooks.find((n) => n.id === targetId);
+            if (sourceNb && targetNb && sourceNb.id !== targetNb.id && fromIdx >= 0) {
+              const [movedTab] = sourceNb.tabs.splice(fromIdx, 1);
+              targetNb.tabs.push(movedTab);
+              changed = true;
+              if (movedTab.driveFolderId && targetNb.driveFolderId && sourceNb.driveFolderId) {
+                driveMoveTask = { itemId: movedTab.driveFolderId, newParentId: targetNb.driveFolderId, oldParentId: sourceNb.driveFolderId };
+              }
             }
           }
-        } else if (dropType === 'notebook') {
-          const targetNb = newData.notebooks.find((n) => n.id === targetId);
-          if (sourceNb && targetNb && sourceNb.id !== targetNb.id) {
-            const [movedTab] = sourceNb.tabs.splice(dragData.index, 1);
-            targetNb.tabs.push(movedTab);
-            changed = true;
-            if (movedTab.driveFolderId && targetNb.driveFolderId && sourceNb.driveFolderId) {
-              driveMoveTask = { itemId: movedTab.driveFolderId, newParentId: targetNb.driveFolderId, oldParentId: sourceNb.driveFolderId };
-            }
+        } else if (dragData.type === 'page') {
+          const fromIdx = sourceTab ? sourceTab.pages.findIndex((p) => p.id === dragData.id) : -1;
+          let targetTab = null;
+          let insertAt = null;
+          if (dropType === 'page') {
+            const targetNb = next.notebooks.find((n) => n.id === activeNotebookId);
+            targetTab = targetNb?.tabs.find((t) => t.id === activeTabId) || null;
+            insertAt = targetIndex;
+          } else if (dropType === 'tab') {
+            const targetNb = next.notebooks.find((n) => n.id === activeNotebookId);
+            targetTab = targetNb?.tabs.find((t) => t.id === targetId) || null;
+            if (targetTab && sourceTab && sourceTab.id === targetTab.id) targetTab = null;
+          } else if (dropType === 'notebook') {
+            const targetNb = next.notebooks.find((n) => n.id === targetId);
+            targetTab = targetNb?.tabs.find((t) => t.id === targetNb.activeTabId) || targetNb?.tabs[0] || null;
+            if (targetTab && sourceTab && sourceTab.id === targetTab.id) targetTab = null;
           }
-        }
-      } else if (dragData.type === 'page') {
-        if (dropType === 'page') {
-          const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
-          const targetTab = targetNb?.tabs.find((t) => t.id === activeTabId);
-          if (sourceTab && targetTab) {
-            const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
-            targetTab.pages.splice(targetIndex, 0, movedPage);
+          if (sourceTab && targetTab && fromIdx >= 0) {
+            const [movedPage] = sourceTab.pages.splice(fromIdx, 1);
+            if (insertAt === null) targetTab.pages.push(movedPage);
+            else targetTab.pages.splice(insertAt, 0, movedPage);
             changed = true;
             if (sourceTab.id !== targetTab.id) {
               const moveId = movedPage.driveLinkFileId || movedPage.driveFileId;
@@ -620,40 +595,18 @@ export function useAppActions() {
               }
             }
           }
-        } else if (dropType === 'tab') {
-          const targetNb = newData.notebooks.find((n) => n.id === activeNotebookId);
-          const targetTab = targetNb?.tabs.find((t) => t.id === targetId);
-          if (sourceTab && targetTab && sourceTab.id !== targetTab.id) {
-            const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
-            targetTab.pages.push(movedPage);
-            changed = true;
-            const moveId = movedPage.driveLinkFileId || movedPage.driveFileId;
-            if (moveId && targetTab.driveFolderId && sourceTab.driveFolderId) {
-              driveMoveTask = { itemId: moveId, newParentId: targetTab.driveFolderId, oldParentId: sourceTab.driveFolderId };
-            }
-          }
-        } else if (dropType === 'notebook') {
-          const targetNb = newData.notebooks.find((n) => n.id === targetId);
-          const targetTab = targetNb?.tabs.find((t) => t.id === targetNb.activeTabId) || targetNb?.tabs[0];
-          if (sourceTab && targetTab && sourceTab.id !== targetTab.id) {
-            const [movedPage] = sourceTab.pages.splice(dragData.index, 1);
-            targetTab.pages.push(movedPage);
-            changed = true;
-            const moveId = movedPage.driveLinkFileId || movedPage.driveFileId;
-            if (moveId && targetTab.driveFolderId && sourceTab.driveFolderId) {
-              driveMoveTask = { itemId: moveId, newParentId: targetTab.driveFolderId, oldParentId: sourceTab.driveFolderId };
-            }
-          }
         }
-      }
+        return { next, changed, driveMoveTask };
+      };
 
-      if (changed) {
-        setData(newData);
-        if (driveMoveTask && moveItemInDrive) {
-          moveItemInDrive(driveMoveTask.itemId, driveMoveTask.newParentId, driveMoveTask.oldParentId, newData);
-        } else {
-          syncIndex(newData);
-        }
+      const result = run(data);
+      if (!result.changed) return;
+      saveToHistory();
+      setData((prev) => run(prev).next);
+      if (result.driveMoveTask && moveItemInDrive) {
+        moveItemInDrive(result.driveMoveTask.itemId, result.driveMoveTask.newParentId, result.driveMoveTask.oldParentId, result.next);
+      } else {
+        syncIndex(result.next);
       }
     },
     [saveToHistory, data, setData, activeNotebookId, activeTabId, syncIndex, moveItemInDrive, setDragHoverTarget, dragHoverTimerRef]
@@ -667,140 +620,142 @@ export function useAppActions() {
       if (!dragDataRaw) return;
       const dragData = JSON.parse(dragDataRaw);
       if (dragData.type !== 'favorite' || dragData.id === targetPageId) return;
-      const next = { ...data };
-      if (!next.favoritesOrder) {
-        const currentStars = [];
-        next.notebooks.forEach((nb) => nb.tabs.forEach((t) => t.pages.forEach((p) => { if (p.starred) currentStars.push(p.id); })));
-        next.favoritesOrder = currentStars;
-      }
-      const order = [...next.favoritesOrder];
-      const fromIdx = order.indexOf(dragData.id);
-      const toIdx = order.indexOf(targetPageId);
-      if (fromIdx > -1 && toIdx > -1) {
+      const apply = (base) => {
+        let order = base.favoritesOrder;
+        if (!order) {
+          order = [];
+          base.notebooks.forEach((nb) => nb.tabs.forEach((t) => t.pages.forEach((p) => { if (p.starred) order.push(p.id); })));
+        }
+        order = [...order];
+        const fromIdx = order.indexOf(dragData.id);
+        const toIdx = order.indexOf(targetPageId);
+        if (fromIdx === -1 || toIdx === -1) return base;
         order.splice(fromIdx, 1);
         order.splice(toIdx, 0, dragData.id);
-        next.favoritesOrder = order;
-        setData(next);
-        persistTree(next);
-      }
+        return { ...base, favoritesOrder: order };
+      };
+      const next = commit(apply);
+      if (next !== data) persistTree(next);
     },
-    [data, setData, persistTree]
+    [data, commit, persistTree]
   );
 
   const updateNotebookIcon = useCallback(
     (notebookId, icon) => {
-      const next = {
-        ...data,
-        notebooks: data.notebooks.map((nb) => (nb.id === notebookId ? { ...nb, icon } : nb)),
-      };
-      setData(next);
+      const next = commit((base) => ({
+        ...base,
+        notebooks: base.notebooks.map((nb) => (nb.id === notebookId ? { ...nb, icon } : nb)),
+      }));
       setNotebookIconPicker(null);
       setIconSearchTerm('');
       syncFolderMeta(next, { entityType: 'notebook', appId: notebookId });
     },
-    [data, setData, syncFolderMeta, setNotebookIconPicker, setIconSearchTerm]
+    [commit, syncFolderMeta, setNotebookIconPicker, setIconSearchTerm]
   );
 
   const updateTabIcon = useCallback(
     (tabId, icon) => {
-      const next = {
-        ...data,
-        notebooks: data.notebooks.map((nb) =>
+      const next = commit((base) => ({
+        ...base,
+        notebooks: base.notebooks.map((nb) =>
           nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id === tabId ? { ...tab, icon } : tab)) }
         ),
-      };
-      setData(next);
+      }));
       setTabIconPicker(null);
       setIconSearchTerm('');
       syncFolderMeta(next, { entityType: 'tab', appId: tabId, notebookId: activeNotebookId });
     },
-    [data, setData, activeNotebookId, syncFolderMeta, setTabIconPicker, setIconSearchTerm]
+    [commit, activeNotebookId, syncFolderMeta, setTabIconPicker, setIconSearchTerm]
   );
 
   const updatePageIcon = useCallback(
     (pageId, icon) => {
-      const next = {
-        ...data,
-        notebooks: data.notebooks.map((nb) =>
-          nb.id !== activeNotebookId
-            ? nb
-            : {
-                ...nb,
-                tabs: nb.tabs.map((tab) =>
-                  tab.id !== activeTabId ? tab : { ...tab, pages: tab.pages.map((p) => (p.id === pageId ? { ...p, icon } : p)) }
-                ),
-              }
-        ),
-      };
-      setData(next);
+      const ids = { notebookId: activeNotebookId, tabId: activeTabId, pageId };
+      const next = commit((base) => updatePageInData(base, ids, (p) => ({ ...p, icon })));
       setPageIconPicker(null);
       setIconSearchTerm('');
       syncPageFile(next, pageId);
     },
-    [data, setData, activeNotebookId, activeTabId, syncPageFile, setPageIconPicker, setIconSearchTerm]
+    [commit, activeNotebookId, activeTabId, syncPageFile, setPageIconPicker, setIconSearchTerm]
   );
 
-  const handleCanvasUpdate = useCallback(
+  const updateActivePage = useCallback(
     (updates) => {
       if (!activePageId || !activeTabId || !activeNotebookId) return;
-      const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updates }));
-      setData(next);
+      const ids = { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId };
+      const next = commit((base) => updatePageInData(base, ids, (p) => ({ ...p, ...updates })));
       triggerContentSync(activePageId, next);
     },
-    [activePageId, activeTabId, activeNotebookId, data, setData, triggerContentSync]
+    [activePageId, activeTabId, activeNotebookId, commit, triggerContentSync]
   );
 
-  const handleTableUpdate = useCallback(
-    (updatedPage) => {
-      if (!activePageId || !activeTabId || !activeNotebookId) return;
-      const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updatedPage }));
-      setData(next);
-      triggerContentSync(activePageId, next);
-    },
-    [activePageId, activeTabId, activeNotebookId, data, setData, triggerContentSync]
-  );
-
-  const handleMermaidUpdate = useCallback(
-    (updates) => {
-      if (!activePageId || !activeTabId || !activeNotebookId) return;
-      const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({ ...p, ...updates }));
-      setData(next);
-      triggerContentSync(activePageId, next);
-    },
-    [activePageId, activeTabId, activeNotebookId, data, setData, triggerContentSync]
-  );
+  const handleCanvasUpdate = updateActivePage;
+  const handleTableUpdate = updateActivePage;
+  const handleMermaidUpdate = updateActivePage;
 
   const updateTabColor = useCallback(
     (tabId, color) => {
-      const next = {
-        ...data,
-        notebooks: data.notebooks.map((nb) =>
+      const next = commit((base) => ({
+        ...base,
+        notebooks: base.notebooks.map((nb) =>
           nb.id !== activeNotebookId ? nb : { ...nb, tabs: nb.tabs.map((tab) => (tab.id !== tabId ? tab : { ...tab, color })) }
         ),
-      };
-      setData(next);
+      }));
       setActiveTabMenu(null);
       syncFolderMeta(next, { entityType: 'tab', appId: tabId, notebookId: activeNotebookId });
     },
-    [data, setData, activeNotebookId, syncFolderMeta, setActiveTabMenu]
+    [commit, activeNotebookId, syncFolderMeta, setActiveTabMenu]
+  );
+
+  /**
+   * Reorder or re-parent a notebook/tab/page without drag-and-drop
+   * (touch action sheet, keyboard). Handles the Drive folder move.
+   */
+  const moveItem = useCallback(
+    (type, id, { toIndex, toTabId, toNotebookId } = {}) => {
+      const run = (base) => {
+        if (type === 'notebook') return moveNotebook(base, id, toIndex);
+        if (type === 'tab') return moveTab(base, id, { toNotebookId, toIndex });
+        return movePage(base, id, { toTabId, toIndex });
+      };
+      const result = run(data);
+      if (!result.changed) return;
+      saveToHistory();
+      setData((prev) => run(prev).data);
+      if (type === 'page' && toTabId) {
+        setActiveNotebookId(result.targetNotebookId);
+        setActiveTabId(result.targetTabId);
+        setActivePageId(id);
+      } else if (type === 'tab' && toNotebookId) {
+        setActiveNotebookId(toNotebookId);
+        setActiveTabId(id);
+      }
+      if (result.driveMove && moveItemInDrive) {
+        moveItemInDrive(result.driveMove.itemId, result.driveMove.newParentId, result.driveMove.oldParentId, result.data);
+      } else {
+        syncIndex(result.data);
+      }
+    },
+    [data, saveToHistory, setData, moveItemInDrive, syncIndex, setActiveNotebookId, setActiveTabId, setActivePageId]
   );
 
   const toggleStar = useCallback(
     (pageId, notebookId, tabId) => {
-      const next = {
-        ...data,
-        notebooks: data.notebooks.map((nb) =>
-          nb.id !== notebookId ? nb : { ...nb, tabs: nb.tabs.map((t) => (t.id !== tabId ? t : { ...t, pages: t.pages.map((p) => (p.id === pageId ? { ...p, starred: !p.starred } : p)) })) }
-        ),
+      const apply = (base) => {
+        let isNowStarred = false;
+        const withPage = updatePageInData(base, { notebookId, tabId, pageId }, (p) => {
+          isNowStarred = !p.starred;
+          return { ...p, starred: isNowStarred };
+        });
+        let favoritesOrder = withPage.favoritesOrder || [];
+        if (isNowStarred && !favoritesOrder.includes(pageId)) favoritesOrder = [...favoritesOrder, pageId];
+        else if (!isNowStarred) favoritesOrder = favoritesOrder.filter((id) => id !== pageId);
+        return { ...withPage, favoritesOrder };
       };
-      if (!next.favoritesOrder) next.favoritesOrder = [];
-      const isNowStarred = next.notebooks.find((n) => n.id === notebookId)?.tabs.find((t) => t.id === tabId)?.pages.find((p) => p.id === pageId)?.starred;
-      if (isNowStarred && !next.favoritesOrder.includes(pageId)) next.favoritesOrder = [...next.favoritesOrder, pageId];
-      else if (!isNowStarred) next.favoritesOrder = next.favoritesOrder.filter((id) => id !== pageId);
-      setData(next);
+      const next = commit(apply);
       triggerContentSync(pageId, next);
     },
-    [data, setData, triggerContentSync]
+    [commit, triggerContentSync]
   );
 
   return {
@@ -819,6 +774,7 @@ export function useAppActions() {
     handleNavDragStart,
     handleNavDrop,
     handleFavoriteDrop,
+    moveItem,
     selectNotebook,
     selectTab,
     selectPage,

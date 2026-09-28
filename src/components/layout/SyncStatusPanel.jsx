@@ -7,10 +7,12 @@ function phaseTitle(phase) {
   if (phase === 'retrying') return 'Retrying';
   if (phase === 'waiting') return 'Waiting';
   if (phase === 'syncing') return 'Syncing';
+  if (phase === 'offline') return 'Offline';
+  if (phase === 'signin-required') return 'Sign in required';
   return 'Synced';
 }
 
-export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
+export function SyncStatusPanel({ syncStatus, data, condensed, onClose, onSignIn }) {
   const [now, setNow] = useState(Date.now());
   const retryAt = syncStatus?.error?.retryAt;
   const phase = syncStatus?.phase || 'idle';
@@ -29,7 +31,7 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
   const currentLabel = describeSyncOp(syncStatus?.currentOp, data);
   const upcoming = (syncStatus?.queue || []).slice(1, 16);
   const retryIn = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
-  const isError = phase === 'retrying' || (phase === 'idle' && syncStatus?.error);
+  const isError = phase === 'retrying' || phase === 'signin-required' || (phase === 'idle' && syncStatus?.error);
 
   return (
     <div
@@ -54,7 +56,7 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
       <div className="px-3 pt-2">
         <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
           <div
-            className={`h-full transition-all ${isError ? 'bg-amber-500' : 'bg-blue-500'}`}
+            className={`h-full transition-all ${isError ? 'bg-amber-500' : phase === 'offline' ? 'bg-gray-400' : 'bg-blue-500'}`}
             style={{ width: `${percent}%` }}
           />
         </div>
@@ -62,6 +64,21 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
 
       <div className="px-3 py-2 text-xs border-b border-gray-100 dark:border-gray-700 min-w-0">
         {phase === 'connecting' && <div className="text-gray-600 dark:text-gray-300">Connecting to Google Drive...</div>}
+        {phase === 'offline' && (
+          <div className="text-gray-600 dark:text-gray-300">
+            You are offline. {remaining > 0 ? `${remaining} change${remaining === 1 ? '' : 's'} saved on this device and will upload when you reconnect.` : 'Changes are saved on this device.'}
+          </div>
+        )}
+        {phase === 'signin-required' && (
+          <div className="text-gray-700 dark:text-gray-200">
+            <div>Your Google session expired. {remaining > 0 ? `${remaining} change${remaining === 1 ? '' : 's'} waiting to upload.` : ''}</div>
+            {onSignIn && (
+              <button onClick={onSignIn} className="mt-2 px-2 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-700">
+                Sign in again
+              </button>
+            )}
+          </div>
+        )}
         {phase === 'waiting' && (
           <div className="text-gray-600 dark:text-gray-300 truncate" title={syncStatus?.error?.message || `Waiting for Drive… ${currentLabel}`}>
             Waiting for Drive… {currentLabel}
@@ -77,7 +94,7 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
         )}
       </div>
 
-      {syncStatus?.error && (
+      {syncStatus?.error && phase !== 'signin-required' && (
         <div className="px-3 py-2 text-xs bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border-b border-amber-100 dark:border-amber-900">
           <div className="flex items-start gap-1.5 min-w-0">
             <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
@@ -112,6 +129,7 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose }) {
 
       <div className="px-3 py-2 text-[10px] text-gray-400 border-t border-gray-100 dark:border-gray-700 truncate">
         Last synced: {formatLastSyncTime(syncStatus?.lastSyncTime)}
+        {syncStatus?.lastPullTime ? ` · Checked Drive: ${formatLastSyncTime(syncStatus.lastPullTime)}` : ''}
       </div>
     </div>
   );
@@ -121,6 +139,8 @@ export function syncFooterLabel(syncStatus) {
   const phase = syncStatus?.phase || 'idle';
   const progress = formatSyncProgress(syncStatus);
   if (phase === 'connecting') return 'Connecting...';
+  if (phase === 'offline') return progress ? `Offline · ${syncStatus.remaining} pending` : 'Offline';
+  if (phase === 'signin-required') return 'Sign in required';
   if (phase === 'retrying') return progress ? `Retrying... ${progress}` : 'Retrying...';
   if (phase === 'waiting') return progress ? `Waiting... ${progress}` : 'Waiting...';
   if (phase === 'syncing') return progress ? `Syncing... ${progress}` : 'Syncing...';

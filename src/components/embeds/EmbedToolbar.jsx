@@ -20,16 +20,16 @@ export function EmbedToolbar({
   const typeName = getTypeDisplayName(page?.type);
 
   return (
-    <div className="flex-shrink-0 px-4 py-1.5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800">
+    <div className="flex-shrink-0 px-2 sm:px-4 py-1.5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-2 bg-white dark:bg-gray-800">
       {/* Left: Icon, Title, Type, Star */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         {serviceIcon?.url ? (
           <img src={serviceIcon.url} alt={typeName} className="w-5 h-5" />
         ) : (
           <span className="text-xl">{page?.icon || '📄'}</span>
         )}
         <div className="flex flex-col">
-          <h1 className="text-base font-semibold dark:text-white">{page?.name || 'Untitled'}</h1>
+          <h1 className="text-base font-semibold dark:text-white truncate">{page?.name || 'Untitled'}</h1>
           <span className="text-xs text-gray-500 dark:text-gray-400">{typeName}</span>
         </div>
         {/* Star button */}
@@ -80,10 +80,11 @@ export function EmbedToolbar({
             href={page.webViewLink || page.embedUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+            className="flex items-center gap-1 p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
             title="Open in new tab"
           >
             <ExternalLink size={14} />
+            <span className="md:hidden text-xs">Open in app</span>
           </a>
         )}
       </div>

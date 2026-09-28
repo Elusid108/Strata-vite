@@ -39,7 +39,6 @@ export function useBlockEditor() {
     dataRef,
     activeIdsRef,
     updatePageContentRef,
-    syncContentDebounceRef,
     scheduleSyncToData,
     setActivePageRows,
     updatePageContent,
@@ -57,17 +56,12 @@ export function useBlockEditor() {
       setActivePageRows(newTree);
       const { notebookId, tabId, pageId } = activeIdsRef.current;
       if (notebookId && tabId && pageId) {
-        const d = dataRef.current;
-        if (d) setData(updatePageInData(d, { notebookId, tabId, pageId }, (p) => ({ ...p, content: newTree, rows: treeToRows(newTree) })));
+        setData((prev) => updatePageInData(prev, { notebookId, tabId, pageId }, (p) => ({ ...p, content: newTree, rows: treeToRows(newTree) })));
       }
-      if (syncContentDebounceRef?.current) {
-        clearTimeout(syncContentDebounceRef.current);
-        syncContentDebounceRef.current = null;
-      }
+      // scheduleSyncToData debounces the Drive upload; no per-keystroke enqueue here.
       scheduleSyncToData();
-      triggerContentSync(activeIdsRef.current.pageId);
     },
-    [scheduleSyncToData, setData, triggerContentSync, setActivePageRows, activePageRowsRef, dataRef, activeIdsRef, syncContentDebounceRef]
+    [scheduleSyncToData, setData, setActivePageRows, activePageRowsRef, activeIdsRef]
   );
 
   const handleRemoveBlock = useCallback(

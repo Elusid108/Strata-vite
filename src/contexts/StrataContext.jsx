@@ -30,6 +30,7 @@ export function StrataProvider({ children }) {
     handleSignIn,
     handleSignOut,
     loadFromDrive,
+    pullFromDrive,
     triggerStructureSync,
     triggerContentSync,
     syncSubtree,
@@ -73,6 +74,11 @@ export function StrataProvider({ children }) {
   const [showEditEmbed, setShowEditEmbed] = useState(false);
   const [favoritesExpanded, setFavoritesExpanded] = useState(false);
   const [syncConflict, setSyncConflict] = useState(null);
+  // Small-screen shell: which pane is showing and whether the notebook drawer is open.
+  const [mobilePane, setMobilePane] = useState('editor'); // 'pages' | 'editor'
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Touch "more" sheet for a nav item: { type: 'notebook'|'tab'|'page', id }
+  const [itemActionSheet, setItemActionSheet] = useState(null);
 
   // Editing states
   const [editingPageId, setEditingPageId] = useState(null);
@@ -139,6 +145,7 @@ export function StrataProvider({ children }) {
     handleSignIn,
     handleSignOut,
     loadFromDrive,
+    pullFromDrive,
     triggerStructureSync,
     triggerContentSync,
     syncSubtree,
@@ -201,6 +208,12 @@ export function StrataProvider({ children }) {
     setFavoritesExpanded,
     syncConflict,
     setSyncConflict,
+    mobilePane,
+    setMobilePane,
+    drawerOpen,
+    setDrawerOpen,
+    itemActionSheet,
+    setItemActionSheet,
     // Editing states
     editingPageId,
     setEditingPageId,

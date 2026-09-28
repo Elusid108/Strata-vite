@@ -3,6 +3,7 @@
 
 import { memo, useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { SLASH_COMMANDS } from '../../lib/constants';
+import { sanitizeHtml } from '../../lib/sanitize';
 
 const ContentBlock = memo(({ 
   html, 
@@ -48,13 +49,13 @@ const ContentBlock = memo(({
     if (!contentEditableRef.current) return;
     const el = contentEditableRef.current;
     if (!isLocked.current && el.innerHTML !== safeHtml) {
-      el.innerHTML = safeHtml;
+      el.innerHTML = sanitizeHtml(safeHtml);
     }
   }, [safeHtml]);
 
   useEffect(() => {
     if (!contentEditableRef.current) return;
-    contentEditableRef.current.innerHTML = processHtml(html, tagName);
+    contentEditableRef.current.innerHTML = sanitizeHtml(processHtml(html, tagName));
   }, [blockId, tagName]);
 
   useLayoutEffect(() => {
@@ -119,6 +120,9 @@ const ContentBlock = memo(({
   const handleFocus = () => { if (onFocus) onFocus(); };
 
   const handleKeyDown = (e) => {
+    // Mobile IMEs (Android) emit keydown during composition with keyCode 229;
+    // acting on those breaks typing. Let the browser finish the composition.
+    if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
     // Handle slash menu navigation
     if (slashMenu.open && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -254,7 +258,7 @@ const ContentBlock = memo(({
       />
       {slashMenu.open && filteredCommands.length > 0 && (
         <div 
-          className="fixed z-[10000] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl py-1 min-w-[220px] max-h-[300px] overflow-y-auto animate-fade-in"
+          className="strata-sheet fixed z-[10000] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl py-1 min-w-[220px] max-h-[300px] overflow-y-auto animate-fade-in"
           style={{ top: slashMenu.position.top, left: slashMenu.position.left }}
         >
           {filteredCommands.map((cmd, index) => (

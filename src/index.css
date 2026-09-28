@@ -81,3 +81,64 @@ html.dark .canvas-grid {
 .animate-fade-in { animation: fade-in 0.15s ease-out; }
 @keyframes bounce-in { 0% { transform: scale(0.9); opacity: 0; } 50% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
 .animate-bounce-in { animation: bounce-in 0.3s ease-out; }
+
+/* ------------------------------------------------------------------ */
+/* Cross-platform: touch, small screens, safe areas                    */
+/* ------------------------------------------------------------------ */
+
+/* Full-height that follows the mobile browser chrome and keyboard. */
+.app-shell { height: 100vh; height: 100dvh; }
+
+/* Safe-area padding helpers (notch / home indicator). */
+.safe-top { padding-top: env(safe-area-inset-top, 0px); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-x { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+
+/* Elements that only make sense on touch devices (e.g. the "more" menu). */
+.touch-only { display: none; }
+
+@media (hover: none) and (pointer: coarse) {
+  /* Hover-revealed actions are always visible on touch. */
+  .group-hover\:opacity-100, .group-hover\/cover\:opacity-100 { opacity: 1 !important; }
+  .touch-only { display: inline-flex; }
+  /* Comfortable tap targets for nav items and toolbar buttons. */
+  .page-item { min-height: 44px; }
+  button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+}
+
+/* Popovers become bottom sheets on small screens. */
+@media (max-width: 767px) {
+  .strata-sheet {
+    position: fixed !important;
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    translate: none !important;
+    transform: none !important;
+    max-height: 55vh;
+    overflow-y: auto;
+    border-radius: 16px 16px 0 0 !important;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.25);
+    animation: sheet-in 0.18s ease-out;
+  }
+  @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  /* Block pages: tighter gutters on phones. */
+  .page-body { padding-left: 1rem !important; padding-right: 1rem !important; }
+  /* Multi-column block rows stack vertically on phones. */
+  .block-row { flex-direction: column; }
+}
+
+/* Horizontal tab strip that scrolls instead of wrapping. */
+.tab-strip { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.tab-strip::-webkit-scrollbar { display: none; }
+.tab-strip > * { flex-shrink: 0; }
+
+/* Drawer overlay for the notebook sidebar on phones. */
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); z-index: 60; }
+.drawer-panel { position: fixed; top: 0; bottom: 0; left: 0; width: min(85vw, 320px); z-index: 61; box-shadow: 8px 0 30px rgba(0,0,0,0.3); animation: drawer-in 0.18s ease-out; }
+@keyframes drawer-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }

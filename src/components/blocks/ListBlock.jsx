@@ -2,6 +2,7 @@
 // Extracted from Strata index.html (lines 1853-2242)
 
 import { memo, useRef, useEffect, useLayoutEffect } from 'react';
+import { sanitizeHtml } from '../../lib/sanitize';
 import { normalizeListContent } from '../../lib/utils';
 
 const ListBlock = memo(({ 
@@ -29,13 +30,13 @@ const ListBlock = memo(({
     if (!listRef.current) return;
     const el = listRef.current;
     if (!isLocked.current && el.innerHTML !== safeHtml) {
-      el.innerHTML = safeHtml;
+      el.innerHTML = sanitizeHtml(safeHtml);
     }
   }, [safeHtml]);
 
   useEffect(() => {
     if (!listRef.current) return;
-    listRef.current.innerHTML = normalizeListContent(html, listType);
+    listRef.current.innerHTML = sanitizeHtml(normalizeListContent(html, listType));
   }, [blockId]);
 
   useLayoutEffect(() => {
@@ -88,7 +89,7 @@ const ListBlock = memo(({
     const fragment = document.createDocumentFragment();
     if (html) {
       const div = document.createElement('div');
-      div.innerHTML = html;
+      div.innerHTML = sanitizeHtml(html);
       const pastedLis = div.querySelectorAll('li');
       if (pastedLis.length > 0) {
         pastedLis.forEach(li => {
@@ -120,6 +121,7 @@ const ListBlock = memo(({
   };
 
   const handleKeyDown = (e) => {
+    if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       const el = listRef.current;
       if (!el) return;
@@ -283,7 +285,7 @@ const ListBlock = memo(({
   if (listType === 'todo') {
     const parseTodoItems = (htmlStr) => {
       const div = document.createElement('div');
-      div.innerHTML = normalizeListContent(htmlStr || '', 'todo');
+      div.innerHTML = sanitizeHtml(normalizeListContent(htmlStr || '', 'todo'));
       const lis = div.querySelectorAll('li');
       return Array.from(lis).map(li => ({
         checked: li.getAttribute('data-checked') === 'true',
@@ -318,6 +320,7 @@ const ListBlock = memo(({
     };
 
     const handleTodoKeyDown = (e) => {
+      if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
       if (e.key === 'Enter' && !e.shiftKey) {
         const container = todoContainerRef.current;
         if (!container) return;
@@ -407,7 +410,7 @@ const ListBlock = memo(({
         if (rows[i]) {
           const contentEl = rows[i].querySelector('.todo-row-content');
           const cb = rows[i].querySelector('input[type="checkbox"]');
-          if (contentEl && contentEl.innerHTML !== item.html) contentEl.innerHTML = item.html;
+          if (contentEl && contentEl.innerHTML !== item.html) contentEl.innerHTML = sanitizeHtml(item.html);
           if (cb) cb.checked = !!item.checked;
         }
       });

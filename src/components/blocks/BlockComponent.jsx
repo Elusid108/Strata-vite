@@ -1,14 +1,14 @@
 // BlockComponent - Block wrapper/renderer component
 // Extracted from Strata index.html (lines 2244-2479)
 
-import { memo, useState } from 'react';
+import { memo, useState, lazy, Suspense } from 'react';
 import { BG_COLORS } from '../../lib/constants';
 import { getDropIndicatorClass, getYouTubeID } from '../../lib/utils';
 import { GripVertical, LinkIcon, ChevronRight } from '../icons';
 import { ImageLightbox } from '../ui';
 import ContentBlock from './ContentBlock';
 import ListBlock from './ListBlock';
-import MapBlock from '../pages/MapBlock';
+const MapBlock = lazy(() => import('../pages/MapBlock'));
 
 const BlockComponent = memo(({ 
   block, 
@@ -243,11 +243,13 @@ const BlockComponent = memo(({
 
           {block.type === 'map' && (
             <div className="space-y-2" data-block-id={block.id}>
-              <MapBlock
-                data={block.mapData}
-                onUpdate={(mapData) => onUpdate(block.id, { mapData })}
-                locked={block.mapData?.locked}
-              />
+              <Suspense fallback={<div className="h-48 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />}>
+                <MapBlock
+                  data={block.mapData}
+                  onUpdate={(mapData) => onUpdate(block.id, { mapData })}
+                  locked={block.mapData?.locked}
+                />
+              </Suspense>
             </div>
           )}
 

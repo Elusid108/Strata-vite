@@ -384,13 +384,66 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
     );
   };
 
+  // Multi-touch: track active pointers for pinch-to-zoom.
+  const pointersRef = useRef(new Map());
+  const pinchRef = useRef(null);
+
+  const applyZoomAt = (clientX, clientY, newScale, panDx = 0, panDy = 0) => {
+    const current = transformRef.current;
+    const rect = canvasRef.current ? canvasRef.current.getBoundingClientRect() : { left: 0, top: 0 };
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    const canvasOffset = 25000;
+    const pointX = (px + canvasOffset - current.x) / current.scale;
+    const pointY = (py + canvasOffset - current.y) / current.scale;
+    const scale = Math.min(Math.max(0.1, newScale), 5);
+    transformRef.current = {
+      x: px + canvasOffset - pointX * scale + panDx,
+      y: py + canvasOffset - pointY * scale + panDy,
+      scale,
+    };
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        setTransform(transformRef.current);
+        rafRef.current = null;
+      });
+    }
+  };
+
   const handlePointerDown = (e) => {
     if(e.target.setPointerCapture) {
         e.target.setPointerCapture(e.pointerId);
     }
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointersRef.current.size === 2) {
+      const [a, b] = [...pointersRef.current.values()];
+      pinchRef.current = {
+        startDist: Math.hypot(a.x - b.x, a.y - b.y),
+        startScale: transformRef.current.scale,
+        lastCenter: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      };
+      // A second finger cancels whatever the first one started.
+      setDragInfo(null);
+      setDrawInfo(null);
+      setResizeInfo(null);
+      return;
+    }
 
     const coords = getCanvasCoords(e);
-    
+
+    // One finger on the empty canvas pans; a quick tap still creates a text box (see pointer up).
+    if (e.pointerType === 'touch' && tool !== 'pen' && tool !== 'eraser' && e.target.id === 'canvas-background') {
+      setDragInfo({
+        type: 'pan',
+        startX: e.clientX,
+        startY: e.clientY,
+        initialTransform: { ...transform },
+        tapCandidate: true,
+        startTime: Date.now(),
+      });
+      return;
+    }
+
     if (isSpacePressed || tool === 'hand' || e.button === 1) {
       e.preventDefault();
       setDragInfo({
@@ -446,6 +499,20 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
   };
 
   const handlePointerMove = (e) => {
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pinchRef.current && pointersRef.current.size >= 2) {
+      const [a, b] = [...pointersRef.current.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const ratio = pinchRef.current.startDist > 0 ? dist / pinchRef.current.startDist : 1;
+      const panDx = center.x - pinchRef.current.lastCenter.x;
+      const panDy = center.y - pinchRef.current.lastCenter.y;
+      pinchRef.current.lastCenter = center;
+      applyZoomAt(center.x, center.y, pinchRef.current.startScale * ratio, panDx, panDy);
+      return;
+    }
     const coords = getCanvasCoords(e);
     setCursorPos(coords);
 
@@ -519,6 +586,29 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
   const handlePointerUp = (e) => {
     if (e.target.releasePointerCapture) {
         e.target.releasePointerCapture(e.pointerId);
+    }
+    pointersRef.current.delete(e.pointerId);
+    if (pinchRef.current) {
+      if (pointersRef.current.size < 2) pinchRef.current = null;
+      setDragInfo(null);
+      return;
+    }
+
+    // Touch tap on empty canvas (no drag): create a text box, like a desktop click.
+    if (dragInfo && dragInfo.type === 'pan' && dragInfo.tapCandidate) {
+      const moved = Math.hypot(e.clientX - dragInfo.startX, e.clientY - dragInfo.startY);
+      if (moved < 8 && Date.now() - dragInfo.startTime < 400) {
+        const coords = getCanvasCoords(e);
+        pushToHistory();
+        const newId = generateId();
+        setContainers((prev) => [...prev, { id: newId, type: 'text', x: coords.x - 10, y: coords.y - 10, content: '', width: null }]);
+        setSelectedId(newId);
+        setSelectedType('container');
+        setTimeout(() => {
+          const el = document.getElementById('editor-' + newId);
+          if (el) el.focus();
+        }, 50);
+      }
     }
 
     if (drawInfo && drawInfo.isDrawing) {
@@ -815,6 +905,7 @@ const CanvasPageComponent = ({ page, onUpdate, saveToHistory, showNotification }
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       >
          <div 
            id="canvas-background"

@@ -15,7 +15,7 @@ export const createDefaultPage = (name = 'New Page') => {
   return { 
     id: generateId(), 
     name, 
-    createdAt: Date.now(), 
+    createdAt: Date.now(), modifiedAt: Date.now(),
     content: tree,
     rows: treeToRows(tree),
     icon: '📄', 
@@ -32,7 +32,7 @@ export const createCanvasPage = (name = 'Untitled Canvas') => {
   return {
     id: generateId(),
     name,
-    createdAt: Date.now(),
+    createdAt: Date.now(), modifiedAt: Date.now(),
     type: 'canvas',
     icon: '🎨',
     canvasData: {
@@ -52,7 +52,7 @@ export const createCodePage = (name = 'Code Page') => {
   return {
     id: generateId(),
     name,
-    createdAt: Date.now(),
+    createdAt: Date.now(), modifiedAt: Date.now(),
     type: 'mermaid',
     icon: '</>',
     codeType: 'raw',
@@ -73,7 +73,7 @@ export const createDatabasePage = (name = 'Database') => {
   return {
     id: generateId(),
     name,
-    createdAt: Date.now(),
+    createdAt: Date.now(), modifiedAt: Date.now(),
     type: 'database',
     icon: '🗄️',
     content: {

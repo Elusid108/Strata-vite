@@ -33,11 +33,19 @@ Created by **Chris Moore Designs LLC**.
 * **Smart Background Loading:** Keeps your most recently used Google Sheets, Docs, and Web Boards active in the background for instant switching without reloads.
 * **LRU Memory Management:** Automatically unmounts oldest background pages to save system memory (configurable in settings).
 
-### 🔒 Privacy & Performance
+### 🔒 Privacy & Sync
 * **100% Client-Side:** No external databases. No analytics. No tracking cookies. 
 * **Drive Sync Engine:** Your data is saved as lightweight `.json` files in your personal Google Drive. 
-* **Smart Syncing:** Features granular "dirty page" tracking to ensure only modified content is uploaded, keeping syncs blazing fast.
-* **Offline Fallback:** Cached local storage ensures you don't lose data if your connection drops.
+* **Push + Pull:** Edits go out through a persisted outbox (survives reloads, retries with backoff). Changes made on other devices are pulled in via the Drive changes feed on focus, on reconnect, and every minute while the app is visible.
+* **Conflict-safe:** Before writing, the app checks whether Drive changed since it last synced. Block pages merge block-by-block; other page types keep both versions (a "conflict copy" page) so nothing is silently overwritten.
+* **Offline:** Works from the local copy while offline and shows "Offline · N pending"; queued changes upload when you reconnect. If the Google session expires, the app asks you to sign in again instead of retrying forever.
+* **Instant start:** The last synced workspace renders immediately; Drive is re-read in the background and only changed pages are downloaded.
+
+### 📱 Desktop, Tablet, Phone
+* **Responsive shell:** three panes on desktop, condensed rails on tablets, and a single-pane layout with a notebook drawer and back navigation on phones.
+* **Touch-first controls:** actions are always visible on touch devices, and a "⋯" action sheet replaces drag-and-drop (rename, star, move up/down, move to another section or notebook, delete).
+* **Pinch to zoom** on Canvas and Mermaid pages; Google Docs/Sheets/Slides open in preview mode on phones with an "Open in app" link.
+* **Installable PWA:** add Strata to your home screen; the app shell is cached for fast starts (your notebooks stay in Drive and are never cached by the service worker).
 
 ---
 
@@ -78,6 +86,12 @@ npm run dev
 
 ```
 
+5. **Run the tests** (sync merge, outbox, pull loop, tree operations):
+```bash
+npm test
+
+```
+
 
 The app will be available at `http://localhost:5173`.
 
@@ -86,7 +100,7 @@ The app will be available at `http://localhost:5173`.
 ## 🛠️ Tech Stack
 
 * **Frontend:** React, Vite, Tailwind CSS
-* **Icons:** Lucide React
+* **Icons:** Hand-rolled SVG icon set (`src/components/icons`)
 * **Integrations:** Google Drive API v3, Google Picker API
 * **Specialty Libraries:** * `leaflet` (Map Pages)
 * `mermaid` (Diagram Pages)
@@ -101,7 +115,7 @@ Strata does not use a traditional database. When a user authenticates, the app c
 
 * **Structure:** `strata_structure.json` and `strata_index.json` act as the manifest, tracking the order and metadata of Notebooks and Tabs.
 * **Content:** Individual pages are saved as separate `.json` files within corresponding Drive folders.
-* **Reconciliation:** The app automatically cleans up orphans and handles external Drive deletions gracefully to maintain state parity.
+* **Reconciliation:** Deletions are recorded as tombstones until Drive confirms them, and a changes-feed pull loop applies edits, moves and deletions made on other devices. See `src/lib/sync-*.js`.
 
 ---
 

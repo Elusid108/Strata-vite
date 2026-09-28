@@ -51,7 +51,7 @@ const TablePage = memo(({ page, onUpdate }) => {
   const saveData = useCallback((newData) => {
     setData(newData);
     if (onUpdate && page) {
-      onUpdate({ ...page, content: newData });
+      onUpdate({ content: newData });
     }
   }, [page, onUpdate]);
 

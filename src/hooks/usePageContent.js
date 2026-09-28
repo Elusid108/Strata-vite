@@ -8,6 +8,9 @@ import { useStrata } from '../contexts/StrataContext';
  * Hook for page content sync, tree/rows derivation, and flush/schedule logic.
  * Consumes useStrata() for data, active IDs, and setActivePageRows.
  * Exposes refs needed by useBlockEditor.
+ *
+ * All writes to `data` go through functional updaters so a concurrent update
+ * from the sync engine (driveFileId / driveEtag) is never clobbered.
  */
 export function usePageContent() {
   const {
@@ -60,45 +63,56 @@ export function usePageContent() {
     activeIdsRef.current = { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId };
   });
 
+  const writeTreeToPage = useCallback(
+    (ids, tree) => {
+      setData((prev) => updatePageInData(prev, ids, (p) => ({ ...p, content: tree, rows: treeToRows(tree) })));
+    },
+    [setData]
+  );
+
   const flushActivePageToData = useCallback(
     (tree) => {
       if (!activePageId || !activeTabId || !activeNotebookId) return null;
       const t = tree ?? activePageRows;
       if (!t) return null;
-      const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({
-        ...p,
-        content: t,
-        rows: treeToRows(t),
-      }));
-      setData(next);
-      return next;
+      const ids = { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId };
+      writeTreeToPage(ids, t);
+      return updatePageInData(data, ids, (p) => ({ ...p, content: t, rows: treeToRows(t) }));
     },
-    [activePageId, activeTabId, activeNotebookId, activePageRows, data, setData]
+    [activePageId, activeTabId, activeNotebookId, activePageRows, data, writeTreeToPage]
   );
 
   const scheduleSyncToData = useCallback(() => {
     if (syncContentDebounceRef.current) clearTimeout(syncContentDebounceRef.current);
     syncContentDebounceRef.current = setTimeout(() => {
       syncContentDebounceRef.current = null;
-      const d = dataRef.current;
       const r = activePageRowsRef.current;
       const { notebookId, tabId, pageId } = activeIdsRef.current;
-      if (!d || !pageId || !tabId || !notebookId || !r) return;
-      setData(updatePageInData(d, { notebookId, tabId, pageId }, (p) => ({ ...p, content: r, rows: treeToRows(r) })));
+      if (!pageId || !tabId || !notebookId || !r) return;
+      writeTreeToPage({ notebookId, tabId, pageId }, r);
       triggerContentSync(pageId);
     }, 300);
-  }, [setData, triggerContentSync]);
+  }, [writeTreeToPage, triggerContentSync]);
 
+  /**
+   * Called on navigation away from a page. Only writes (and queues a Drive
+   * upload) when the editor holds content that differs from what is stored,
+   * so simply browsing pages does not generate Drive traffic.
+   */
   const flushAndClearSync = useCallback(() => {
+    const hadPendingDebounce = !!syncContentDebounceRef.current;
     if (syncContentDebounceRef.current) {
       clearTimeout(syncContentDebounceRef.current);
       syncContentDebounceRef.current = null;
     }
-    if (activePageId && activeTabId && activeNotebookId && activePageRows != null) {
-      flushActivePageToData(activePageRows);
-      triggerContentSync(activePageId);
-    }
-  }, [activePageId, activeTabId, activeNotebookId, activePageRows, flushActivePageToData, triggerContentSync]);
+    if (!activePageId || !activeTabId || !activeNotebookId || activePageRows == null) return;
+    const ctx = getActiveContext(data, activeNotebookId, activeTabId, activePageId);
+    const stored = ctx.page ? normalizePageContent(ctx.page) : null;
+    const dirty = hadPendingDebounce || stored !== activePageRows;
+    if (!dirty) return;
+    flushActivePageToData(activePageRows);
+    triggerContentSync(activePageId);
+  }, [activePageId, activeTabId, activeNotebookId, activePageRows, data, flushActivePageToData, triggerContentSync]);
 
   const updatePageContent = useCallback(
     (tree, shouldSaveHistory = false) => {
@@ -106,20 +120,15 @@ export function usePageContent() {
       const t = tree && tree.version === TREE_VERSION ? tree : rowsToTree(Array.isArray(tree) ? tree : []);
       setActivePageRows(t);
       if (shouldSaveHistory) {
-        const next = updatePageInData(data, { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId }, (p) => ({
-          ...p,
-          content: t,
-          rows: treeToRows(t),
-        }));
-        setData(next);
-        saveToHistory(next);
+        const ids = { notebookId: activeNotebookId, tabId: activeTabId, pageId: activePageId };
+        writeTreeToPage(ids, t);
+        saveToHistory(updatePageInData(data, ids, (p) => ({ ...p, content: t, rows: treeToRows(t) })));
         triggerContentSync(activePageId);
       } else {
         scheduleSyncToData();
-        triggerContentSync(activePageId);
       }
     },
-    [activePageId, activeTabId, activeNotebookId, data, setData, saveToHistory, scheduleSyncToData, triggerContentSync, setActivePageRows]
+    [activePageId, activeTabId, activeNotebookId, data, writeTreeToPage, saveToHistory, scheduleSyncToData, triggerContentSync, setActivePageRows]
   );
 
   useEffect(() => {

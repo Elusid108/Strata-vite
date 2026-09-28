@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getEmbedUrlForType } from '../../lib/embed-utils';
+import { useViewport } from '../../hooks/useViewport';
 import { EmbedToolbar } from './EmbedToolbar';
 import { GoogleDocEmbed } from './GoogleDocEmbed';
 import { GoogleFormEmbed } from './GoogleFormEmbed';
@@ -22,24 +23,30 @@ export function EmbedPage({
   onEditUrl,
   isStarred = false
 }) {
+  const { isMobile } = useViewport();
+  // Google's edit UIs do not work inside an iframe on phones; default to preview there.
+  const mobilePreview = isMobile && ['doc', 'sheet', 'slide'].includes(page?.type);
+
   // View mode state (edit/preview) - persist in page data or local
   const [viewMode, setViewMode] = useState(() => {
-    // Check if page has stored viewMode or detect from URL
+    if (mobilePreview) return 'preview';
     if (page?.viewMode) return page.viewMode;
     if (page?.embedUrl?.includes('/preview')) return 'preview';
     return 'edit';
   });
-  
+
   // Update view mode when page changes
   useEffect(() => {
-    if (page?.viewMode) {
+    if (mobilePreview) {
+      setViewMode('preview');
+    } else if (page?.viewMode) {
       setViewMode(page.viewMode);
     } else if (page?.embedUrl?.includes('/preview')) {
       setViewMode('preview');
     } else {
       setViewMode('edit');
     }
-  }, [page?.id, page?.viewMode, page?.embedUrl]);
+  }, [page?.id, page?.viewMode, page?.embedUrl, mobilePreview]);
   
   // Handle view mode change
   const handleViewModeChange = (mode) => {

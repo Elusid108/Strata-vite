@@ -72,7 +72,17 @@ export function StrataProvider({ children }) {
   const [tabIconPicker, setTabIconPicker] = useState(null);
   const [pageIconPicker, setPageIconPicker] = useState(null);
   const [showEditEmbed, setShowEditEmbed] = useState(false);
-  const [favoritesExpanded, setFavoritesExpanded] = useState(false);
+  // Sidebar section expansion lives in settings so it survives reloads (device-local).
+  const favoritesExpanded = !!settings.favoritesExpanded;
+  const setFavoritesExpanded = useCallback(
+    (v) => setSettings((s) => ({ ...s, favoritesExpanded: typeof v === 'function' ? !!v(!!s.favoritesExpanded) : !!v })),
+    [setSettings]
+  );
+  const pinnedExpanded = settings.pinnedExpanded !== false;
+  const setPinnedExpanded = useCallback(
+    (v) => setSettings((s) => ({ ...s, pinnedExpanded: typeof v === 'function' ? !!v(s.pinnedExpanded !== false) : !!v })),
+    [setSettings]
+  );
   const [syncConflict, setSyncConflict] = useState(null);
   // Small-screen shell: which pane is showing and whether the notebook drawer is open.
   const [mobilePane, setMobilePane] = useState('editor'); // 'pages' | 'editor'
@@ -206,6 +216,8 @@ export function StrataProvider({ children }) {
     setShowEditEmbed,
     favoritesExpanded,
     setFavoritesExpanded,
+    pinnedExpanded,
+    setPinnedExpanded,
     syncConflict,
     setSyncConflict,
     mobilePane,

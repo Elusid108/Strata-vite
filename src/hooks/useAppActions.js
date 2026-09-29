@@ -1,6 +1,16 @@
 import { useCallback } from 'react';
-import { COLORS } from '../lib/constants';
+import { COLORS, APP_VERSION } from '../lib/constants';
 import { generateId, getNextTabColor, updatePageInData } from '../lib/utils';
+import {
+  exportItemFromData,
+  serializeExport,
+  downloadJson,
+  readFileAsText,
+  parseExport,
+  prepareImport,
+  insertImport,
+  describeImportSummary,
+} from '../lib/import-export';
 import {
   createDefaultPage,
   createCanvasPage,
@@ -8,7 +18,7 @@ import {
   createDatabasePage
 } from '../lib/page-factories';
 import { parseEmbedUrl } from '../lib/embed-utils';
-import { isLinkPage } from '../lib/sync-merge';
+import { isLinkPage, findPageContext } from '../lib/sync-merge';
 import { moveNotebook, moveTab, movePage } from '../lib/nav-move';
 import { useViewport } from './useViewport';
 import { useStrata } from '../contexts/StrataContext';
@@ -39,8 +49,11 @@ export function useAppActions() {
   const {
     data,
     setData,
+    settings,
+    setSettings,
     saveToHistory,
     triggerContentSync,
+    triggerStructureSync,
     syncSubtree,
     syncFolderMeta,
     syncPageFile,
@@ -430,6 +443,9 @@ export function useAppActions() {
         return next;
       };
       const newData = commit(apply);
+      if (type === 'page' && (settings.pinnedPageIds || []).includes(id)) {
+        setSettings((s) => ({ ...s, pinnedPageIds: (s.pinnedPageIds || []).filter((pid) => pid !== id) }));
+      }
 
       // Phase 3: selection follow-up.
       if (type === 'notebook' && activeNotebookId === id) {
@@ -457,6 +473,8 @@ export function useAppActions() {
       saveToHistory,
       data,
       commit,
+      settings.pinnedPageIds,
+      setSettings,
       activeNotebookId,
       activeTabId,
       activePageId,
@@ -758,7 +776,115 @@ export function useAppActions() {
     [commit, triggerContentSync]
   );
 
+  // ==================== PINS (device-local, stored in settings) ====================
+
+  const getPinnedPages = useCallback(() => {
+    const out = [];
+    for (const id of settings.pinnedPageIds || []) {
+      const ctx = findPageContext(data, id);
+      if (!ctx) continue; // page gone: pruned at read time
+      out.push({
+        ...ctx.page,
+        notebookId: ctx.notebook.id,
+        tabId: ctx.tab.id,
+        notebookName: ctx.notebook.name,
+        tabName: ctx.tab.name,
+      });
+    }
+    return out;
+  }, [data, settings.pinnedPageIds]);
+
+  const isPinned = useCallback((pageId) => (settings.pinnedPageIds || []).includes(pageId), [settings.pinnedPageIds]);
+
+  const togglePin = useCallback(
+    (pageId) => {
+      const wasPinned = (settings.pinnedPageIds || []).includes(pageId);
+      setSettings((s) => {
+        const cur = s.pinnedPageIds || [];
+        const next = cur.includes(pageId) ? cur.filter((x) => x !== pageId) : [...cur, pageId];
+        return { ...s, pinnedPageIds: next, ...(cur.includes(pageId) ? {} : { pinnedExpanded: true }) };
+      });
+      showNotification(wasPinned ? 'Page unpinned' : 'Page pinned', 'success');
+    },
+    [settings.pinnedPageIds, setSettings, showNotification]
+  );
+
+  // ==================== IMPORT / EXPORT ====================
+
+  const exportItem = useCallback(
+    (type, id) => {
+      try {
+        const { envelope, filename } = exportItemFromData(data, type, id, { appVersion: APP_VERSION });
+        downloadJson(filename, serializeExport(envelope));
+        showNotification(`${type === 'tab' ? 'Section' : type.charAt(0).toUpperCase() + type.slice(1)} exported`, 'success');
+      } catch (e) {
+        showNotification(e?.message || 'Export failed', 'error');
+      }
+    },
+    [data, showNotification]
+  );
+
+  const importFromFile = useCallback(
+    async (file) => {
+      if (!file) return;
+      let envelope;
+      try {
+        envelope = parseExport(await readFileAsText(file));
+      } catch (e) {
+        showNotification(`Import failed: ${e?.message || 'unknown error'}`, 'error');
+        return;
+      }
+      saveToHistory();
+      const prepared = prepareImport(envelope);
+      const opts = { activeNotebookId, activeTabId };
+      let result = null;
+      const newData = commit((base) => {
+        result = insertImport(base, prepared, opts);
+        return result.data;
+      });
+      if (result?.selection) {
+        const { notebookId, tabId, pageId } = result.selection;
+        flushAndClearSync();
+        if (tabId) localStorage.setItem(`strata_history_nb_${notebookId}`, tabId);
+        if (tabId && pageId) localStorage.setItem(`strata_history_tab_${tabId}`, pageId);
+        setActiveNotebookId(notebookId);
+        setActiveTabId(tabId);
+        setActivePageId(pageId);
+        setEditingPageId(null);
+        setEditingTabId(null);
+        setEditingNotebookId(null);
+        if (isMobile) setMobilePane('editor');
+      }
+      const summary = describeImportSummary(result?.summary || {});
+      const warn = result?.warnings?.length ? ` (${result.warnings.join('; ')})` : '';
+      showNotification(`Imported ${summary}${warn}`, result?.warnings?.length ? 'info' : 'success');
+      triggerStructureSync(newData);
+    },
+    [
+      showNotification,
+      saveToHistory,
+      activeNotebookId,
+      activeTabId,
+      commit,
+      flushAndClearSync,
+      setActiveNotebookId,
+      setActiveTabId,
+      setActivePageId,
+      setEditingPageId,
+      setEditingTabId,
+      setEditingNotebookId,
+      isMobile,
+      setMobilePane,
+      triggerStructureSync,
+    ]
+  );
+
   return {
+    getPinnedPages,
+    isPinned,
+    togglePin,
+    exportItem,
+    importFromFile,
     addNotebook,
     addTab,
     addPage,

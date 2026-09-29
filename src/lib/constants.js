@@ -102,6 +102,10 @@ export const DEFAULT_SETTINGS = {
   condensedView: false,
   limitBackgroundPages: false,
   maxBackgroundPages: 10,
+  // Device-local sidebar state (never synced to Drive).
+  pinnedPageIds: [],
+  pinnedExpanded: true,
+  favoritesExpanded: false,
 };
 
 // --- Default Table Schema ---

@@ -4,6 +4,7 @@ import { Plus, Star, X, MoreVertical } from '../../components/icons';
 import { useStrata } from '../../contexts/StrataContext';
 import { useAppActions } from '../../hooks/useAppActions';
 import { useViewport } from '../../hooks/useViewport';
+import { ImportFileButton } from '../ui/ImportFileButton';
 
 /**
  * Horizontal strip of the active notebook's tabs. Scrolls sideways on narrow
@@ -109,6 +110,7 @@ export function TabStrip() {
         <button onClick={addTab} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded" aria-label="Add section">
           <Plus size={14} />
         </button>
+        {!condensed && <ImportFileButton label="Import section" className="opacity-60 hover:opacity-100" />}
       </div>
     </div>
   );
@@ -194,6 +196,8 @@ export function PagesPanel({ fill = false }) {
               >
                 <img src={DRIVE_LOGO_URL} alt="" className="w-5 h-5 object-contain" /> Drive &amp; URL
               </button>
+              <div className="border-t border-gray-100 dark:border-gray-700 my-1"></div>
+              <ImportFileButton variant="menu" label="Import page…" onPicked={() => setShowPageTypeMenu(false)} />
             </div>
           )}
         </div>
@@ -278,7 +282,7 @@ export function PagesPanel({ fill = false }) {
                     e.stopPropagation();
                     setItemActionSheet({ type: 'page', id: page.id });
                   }}
-                  className="touch-only item-action-trigger p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 item-action-trigger p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-all"
                   aria-label="Page options"
                 >
                   <MoreVertical size={14} />

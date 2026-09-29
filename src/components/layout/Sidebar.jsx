@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { APP_VERSION } from '../../lib/constants';
 import { getPickerPosition } from '../../lib/utils';
-import { Book, Plus, Settings, Star, X, GoogleG, ChevronRight, Minimize2, Maximize2, MoreVertical } from '../../components/icons';
+import { Book, Plus, Settings, Star, X, GoogleG, Minimize2, Maximize2, MoreVertical, Pin } from '../../components/icons';
 import { useStrata } from '../../contexts/StrataContext';
 import { useAppActions } from '../../hooks/useAppActions';
 import { useViewport } from '../../hooks/useViewport';
 import { SyncStatusPanel, syncFooterLabel } from './SyncStatusPanel';
+import { CollapsibleNavSection } from './CollapsibleNavSection';
+import { ImportFileButton } from '../ui/ImportFileButton';
 
 /**
  * Notebook list + account + sync footer.
@@ -27,6 +29,8 @@ export function Sidebar({ variant = 'rail', onClose }) {
     syncStatus,
     favoritesExpanded,
     setFavoritesExpanded,
+    pinnedExpanded,
+    setPinnedExpanded,
     setActiveNotebookId,
     setActiveTabId,
     setActivePageId,
@@ -54,6 +58,8 @@ export function Sidebar({ variant = 'rail', onClose }) {
     handleNavDrop,
     handleFavoriteDrop,
     getStarredPages,
+    getPinnedPages,
+    togglePin,
     flushAndClearSync,
     updateLocalName,
     syncRenameToDrive,
@@ -65,6 +71,7 @@ export function Sidebar({ variant = 'rail', onClose }) {
   const condensed = !isDrawer && (settings.condensedView || isTablet);
 
   const starredPages = getStarredPages();
+  const pinnedPages = getPinnedPages();
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const syncPanelRef = useRef(null);
   const syncPhase = syncStatus?.phase || 'idle';
@@ -182,51 +189,79 @@ export function Sidebar({ variant = 'rail', onClose }) {
       </div>
 
       {starredPages.length > 0 && (
-        <div className="border-b border-gray-200 dark:border-gray-700">
-          <button
-            onClick={() => setFavoritesExpanded(!favoritesExpanded)}
-            className={`w-full flex items-center ${condensed ? 'justify-center' : 'gap-2'} p-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase hover:bg-gray-200 dark:hover:bg-gray-700`}
-            title={condensed ? `Favorites (${starredPages.length})` : undefined}
-          >
-            {!condensed && <ChevronRight size={12} className={`transition-transform ${favoritesExpanded ? 'rotate-90' : ''}`} />}
-            <Star size={12} className="text-yellow-400" />
-            {!condensed && (
-              <>
-                <span>Favorites</span>
-                <span className="text-gray-400">({starredPages.length})</span>
-              </>
-            )}
-          </button>
-          {favoritesExpanded && (
-            <div className="pb-2">
-              {starredPages.map((page) => (
-                <div
-                  key={page.id}
-                  draggable={!isMobile}
-                  onDragStart={(e) => handleNavDragStart(e, 'favorite', page.id, 0)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => handleFavoriteDrop(e, page.id)}
-                  onClick={() => handleFavoriteClick(page)}
-                  className={`flex items-center ${condensed ? 'justify-center' : 'pl-6 pr-4 gap-2'} py-1.5 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700`}
-                  title={condensed ? page.name : undefined}
-                >
-                  <span className={condensed ? 'text-xl' : ''}>{page.icon || '📄'}</span>
-                  {!condensed && <span className="truncate">{page.name}</span>}
-                  {!condensed && <Star size={14} className="text-yellow-400 opacity-50 ml-auto flex-shrink-0 fill-current" />}
-                </div>
-              ))}
+        <CollapsibleNavSection
+          icon={<Star size={12} className="text-yellow-400" />}
+          label="Favorites"
+          count={starredPages.length}
+          expanded={favoritesExpanded}
+          onToggle={() => setFavoritesExpanded(!favoritesExpanded)}
+          condensed={condensed}
+        >
+          {starredPages.map((page) => (
+            <div
+              key={page.id}
+              draggable={!isMobile}
+              onDragStart={(e) => handleNavDragStart(e, 'favorite', page.id, 0)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFavoriteDrop(e, page.id)}
+              onClick={() => handleFavoriteClick(page)}
+              className={`flex items-center ${condensed ? 'justify-center' : 'pl-6 pr-4 gap-2'} py-1.5 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700`}
+              title={condensed ? page.name : undefined}
+            >
+              <span className={condensed ? 'text-xl' : ''}>{page.icon || '📄'}</span>
+              {!condensed && <span className="truncate">{page.name}</span>}
+              {!condensed && <Star size={14} className="text-yellow-400 opacity-50 ml-auto flex-shrink-0 fill-current" />}
             </div>
-          )}
-        </div>
+          ))}
+        </CollapsibleNavSection>
+      )}
+
+      {pinnedPages.length > 0 && (
+        <CollapsibleNavSection
+          icon={<Pin size={12} className="text-blue-500" />}
+          label="Pinned"
+          count={pinnedPages.length}
+          expanded={pinnedExpanded}
+          onToggle={() => setPinnedExpanded(!pinnedExpanded)}
+          condensed={condensed}
+        >
+          {pinnedPages.map((page) => (
+            <div
+              key={page.id}
+              onClick={() => handleFavoriteClick(page)}
+              className={`group flex items-center ${condensed ? 'justify-center' : 'pl-6 pr-3 gap-2'} py-1.5 text-sm cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700`}
+              title={condensed ? page.name : `${page.notebookName} › ${page.tabName}`}
+            >
+              <span className={condensed ? 'text-xl' : ''}>{page.icon || '📄'}</span>
+              {!condensed && <span className="truncate flex-1">{page.name}</span>}
+              {!condensed && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    togglePin(page.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-gray-400 hover:text-red-500 flex-shrink-0"
+                  aria-label="Unpin page"
+                  title="Unpin"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </CollapsibleNavSection>
       )}
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-2">
           <div className={`flex items-center ${condensed ? 'justify-center' : 'justify-between'} mb-2`}>
             {!condensed && <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Notebooks</span>}
-            <button onClick={addNotebook} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded" title="Add notebook" aria-label="Add notebook">
-              <Plus size={14} />
-            </button>
+            <div className="flex items-center">
+              <button onClick={addNotebook} className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded" title="Add notebook" aria-label="Add notebook">
+                <Plus size={14} />
+              </button>
+              {!condensed && <ImportFileButton label="Import notebook" className="opacity-60 hover:opacity-100" />}
+            </div>
           </div>
           {data.notebooks.map((notebook, index) => (
             <div
@@ -296,7 +331,7 @@ export function Sidebar({ variant = 'rail', onClose }) {
                       e.stopPropagation();
                       setItemActionSheet({ type: 'notebook', id: notebook.id });
                     }}
-                    className="touch-only item-action-trigger p-1 rounded text-gray-400"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 item-action-trigger p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                     aria-label="Notebook options"
                   >
                     <MoreVertical size={12} />

@@ -44,9 +44,13 @@ export function useLocalStorage() {
     return null;
   }, []);
 
-  const saveSettings = useCallback((newSettings) => {
-    setSettings(newSettings);
-    localStorage.setItem('note-app-settings-v1', JSON.stringify(newSettings));
+  // Accepts either a settings object or an updater function (like setState).
+  const saveSettings = useCallback((next) => {
+    setSettings((prev) => {
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      localStorage.setItem('note-app-settings-v1', JSON.stringify(resolved));
+      return resolved;
+    });
   }, []);
 
   useEffect(() => {

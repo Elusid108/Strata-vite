@@ -22,6 +22,8 @@ import {
   Edit3,
   AlertCircle,
   FolderOpen,
+  Download,
+  MoreVertical,
 } from '../../components/icons';
 import MapConfigPopup from '../pages/MapConfigPopup';
 import { useStrata } from '../../contexts/StrataContext';
@@ -70,6 +72,7 @@ export function ModalsContainer() {
     triggerContentSync,
     setActiveTabMenu,
     setItemToDelete,
+    setItemActionSheet,
     activeTabMenu,
     itemToDelete,
     showSignOutConfirm,
@@ -118,6 +121,7 @@ export function ModalsContainer() {
     confirmDelete,
     addEmbedPageFromUrl,
     addGooglePage,
+    exportItem,
   } = useAppActions();
 
   return (
@@ -139,6 +143,18 @@ export function ModalsContainer() {
             ))}
           </div>
           <div className="border-t border-gray-100 dark:border-gray-700 my-2"></div>
+          <button
+            onClick={() => { exportItem('tab', activeTabMenu.id); setActiveTabMenu(null); }}
+            className="w-full text-left text-xs p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2"
+          >
+            <Download size={12} /> Export Section
+          </button>
+          <button
+            onClick={() => { setItemActionSheet({ type: 'tab', id: activeTabMenu.id }); setActiveTabMenu(null); }}
+            className="w-full text-left text-xs p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2"
+          >
+            <MoreVertical size={12} /> More…
+          </button>
           <button
             onClick={() => { setItemToDelete({ type: 'tab', id: activeTabMenu.id }); setActiveTabMenu(null); }}
             className="w-full text-left text-xs text-red-600 p-1.5 hover:bg-red-50 dark:hover:bg-red-900/30 rounded flex items-center gap-2"

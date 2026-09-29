@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStrata } from '../../contexts/StrataContext';
 import { useAppActions } from '../../hooks/useAppActions';
-import { Star, Trash2, Edit3, ChevronRight, X } from '../icons';
+import { Star, Trash2, Edit3, ChevronRight, X, Download, Pin, PinOff } from '../icons';
 
 /**
  * Touch-friendly action sheet for a notebook, tab or page: rename, star,
@@ -23,7 +23,7 @@ export function ItemActionSheet() {
     setMobilePane,
     setActiveTabMenu,
   } = useStrata();
-  const { moveItem, toggleStar, executeDelete } = useAppActions();
+  const { moveItem, toggleStar, executeDelete, exportItem, togglePin, isPinned } = useAppActions();
   const [step, setStep] = useState('actions'); // 'actions' | 'move'
 
   if (!itemActionSheet) return null;
@@ -143,6 +143,11 @@ export function ItemActionSheet() {
                 {item.starred ? 'Remove from favorites' : 'Add to favorites'}
               </Row>
             )}
+            {type === 'page' && (
+              <Row onClick={() => { togglePin(id); close(); }} icon={isPinned(id) ? <PinOff size={16} /> : <Pin size={16} className="text-blue-500" />}>
+                {isPinned(id) ? 'Unpin page' : 'Pin page'}
+              </Row>
+            )}
             {type === 'tab' && (
               <Row
                 onClick={() => {
@@ -161,6 +166,7 @@ export function ItemActionSheet() {
                 Move to {type === 'page' ? 'another section' : 'another notebook'}…
               </Row>
             )}
+            <Row onClick={() => { exportItem(type, id); close(); }} icon={<Download size={16} />}>Export {label}…</Row>
             <div className="border-t border-gray-100 dark:border-gray-700 my-1" />
             <Row onClick={remove} icon={<Trash2 size={16} />} danger>Delete {label}</Row>
           </div>

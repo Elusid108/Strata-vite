@@ -786,7 +786,7 @@ export function useGoogleDrive(data, setData, showNotification) {
   );
 
   const syncSubtree = useCallback(
-    (tree, { notebookId, tabId, pageId } = {}) => {
+    (tree, { notebookId, tabId, pageId, pageIds } = {}) => {
       const snapshot = persistSnapshot(tree);
       const notebook = (snapshot?.notebooks || []).find((nb) => nb.id === notebookId);
       if (notebook && !notebook.driveFolderId) {
@@ -802,12 +802,14 @@ export function useGoogleDrive(data, setData, showNotification) {
           `folder:${tab.id}`
         );
       }
-      const page = tab?.pages?.find((p) => p.id === pageId);
-      if (page && !pageHasStrataFile(page)) {
-        enqueueOp(
-          { type: 'ensurePageFile', pageId: page.id, tabId: tab.id, notebookId: notebook.id },
-          `page:${page.id}`
-        );
+      for (const id of [...(pageIds || []), pageId].filter(Boolean)) {
+        const page = tab?.pages?.find((p) => p.id === id);
+        if (page && !pageHasStrataFile(page)) {
+          enqueueOp(
+            { type: 'ensurePageFile', pageId: page.id, tabId: tab.id, notebookId: notebook.id },
+            `page:${page.id}`
+          );
+        }
       }
       enqueueOp({ type: 'saveIndex' }, 'saveIndex');
       kickWorker();

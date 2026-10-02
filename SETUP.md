@@ -75,6 +75,8 @@ This guide walks you through configuring the Google API credentials required to 
 
    Replace the placeholder values with the Client ID and API Key you obtained above.
 
+   The Drive file browser also needs your Google Cloud **project number** (the Picker's `setAppId`), so files you pick become readable by Strata under the `drive.file` scope. It is derived from the client ID automatically (the digits before the first `-`). Only set `VITE_GOOGLE_APP_ID` if your client ID does not follow that pattern.
+
 ## Verifying Your Setup
 
 1. Start the development server:

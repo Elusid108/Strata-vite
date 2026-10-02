@@ -302,13 +302,14 @@ const BlockComponent = memo(({
                     <button 
                       onClick={() => {
                         GoogleAPI.showDrivePicker((file) => {
+                          if (!file) return;
                           onUpdate(block.id, {
                             driveFileId: file.id,
                             webViewLink: file.url,
                             mimeType: file.mimeType,
                             driveFileName: file.name
                           });
-                        });
+                        }, { multiple: false, title: 'Choose a Drive file' });
                       }}
                       className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
                     >

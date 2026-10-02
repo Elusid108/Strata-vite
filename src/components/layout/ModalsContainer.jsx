@@ -31,6 +31,7 @@ import { useStrata } from '../../contexts/StrataContext';
 import { usePageContent } from '../../hooks/usePageContent';
 import { useBlockEditor } from '../../hooks/useBlockEditor';
 import { useAppActions } from '../../hooks/useAppActions';
+import { DriveUrlModal } from './DriveUrlModal';
 
 function activateFromTree(tree, setActiveNotebookId, setActiveTabId, setActivePageId) {
   if (!tree?.notebooks?.length) return;
@@ -101,8 +102,6 @@ export function ModalsContainer() {
     markInitialLoadComplete,
     notification,
     showNotification,
-    driveUrlModalValue,
-    setDriveUrlModalValue,
     editEmbedName,
     setEditEmbedName,
     editEmbedUrl,
@@ -125,8 +124,6 @@ export function ModalsContainer() {
     updateTabIcon,
     updatePageIcon,
     confirmDelete,
-    addEmbedPageFromUrl,
-    addGooglePage,
     exportItem,
   } = useAppActions();
 
@@ -602,107 +599,7 @@ export function ModalsContainer() {
         </div>
       )}
 
-      {/* Add Drive URL Modal */}
-      {showDriveUrlModal && (
-        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-bold text-xl flex items-center gap-3 dark:text-white">
-                <img src={DRIVE_LOGO_URL} alt="" className="w-8 h-8 object-contain" /> Add Drive & URL
-              </h3>
-              <button
-                onClick={() => { setShowDriveUrlModal(false); setDriveUrlModalValue(''); }}
-                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-              >
-                <X size={20} className="dark:text-white" />
-              </button>
-            </div>
-
-            <div className="mb-6">
-              <button
-                onClick={() => {
-                  setShowDriveUrlModal(false);
-                  setDriveUrlModalValue('');
-                  if (typeof GoogleAPI !== 'undefined' && GoogleAPI.showDrivePicker) {
-                    GoogleAPI.showDrivePicker((file) => {
-                      addGooglePage(file);
-                    });
-                  } else {
-                    showNotification('Drive Picker not available', 'error');
-                  }
-                }}
-                className="w-full py-3 px-4 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center gap-2"
-              >
-                <FolderOpen size={18} /> Browse
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3 mb-6">
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
-              <span className="text-sm text-gray-400">OR</span>
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600"></div>
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Compatible types</label>
-              <div className="grid grid-cols-5 gap-2">
-                {DRIVE_SERVICE_ICONS.map((item) => (
-                  <div key={item.type} className="flex flex-col items-center gap-1">
-                    <img src={item.url} alt={item.name} className="w-10 h-10 object-contain rounded" />
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 text-center leading-tight">{item.name}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">URL</label>
-              <input
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                placeholder="https://docs... or https://lucid.app/... or Miro URL"
-                value={driveUrlModalValue}
-                onChange={(e) => setDriveUrlModalValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && driveUrlModalValue) {
-                    if (addEmbedPageFromUrl(driveUrlModalValue)) {
-                      setShowDriveUrlModal(false);
-                      setDriveUrlModalValue('');
-                    }
-                  } else if (e.key === 'Escape') {
-                    setShowDriveUrlModal(false);
-                    setDriveUrlModalValue('');
-                  }
-                }}
-                autoFocus
-              />
-              <p className="text-xs text-gray-400 mt-2">
-                Paste a link to a Google Drive file, PDF, Lucidchart, Miro board, or Draw.io diagram.
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => { setShowDriveUrlModal(false); setDriveUrlModalValue(''); }}
-                className="px-5 py-2 font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (addEmbedPageFromUrl(driveUrlModalValue)) {
-                    setShowDriveUrlModal(false);
-                    setDriveUrlModalValue('');
-                  }
-                }}
-                disabled={!driveUrlModalValue}
-                className="px-5 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Add Page
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showDriveUrlModal && <DriveUrlModal />}
 
       {/* Edit Embed URL Modal */}
       {showEditEmbed && (() => {

@@ -19,6 +19,10 @@
 
 export const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 export const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
+// Google Cloud project number. The Picker needs it (setAppId) so files the user
+// picks become readable by the app under the drive.file scope. OAuth client IDs
+// are "<projectNumber>-<hash>.apps.googleusercontent.com", so it can be derived.
+export const APP_ID = import.meta.env.VITE_GOOGLE_APP_ID || CLIENT_ID.split('-')[0] || '';
 export const SCOPES = [
   'https://www.googleapis.com/auth/drive.appdata',
   'https://www.googleapis.com/auth/drive.file',
@@ -26,4 +30,4 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.profile'
 ];
 
-export default { CLIENT_ID, API_KEY, SCOPES };
+export default { CLIENT_ID, API_KEY, APP_ID, SCOPES };

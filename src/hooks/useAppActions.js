@@ -18,6 +18,7 @@ import {
   createDatabasePage
 } from '../lib/page-factories';
 import { parseEmbedUrl } from '../lib/embed-utils';
+import { buildDrivePage, buildPageFromParsedUrl } from '../lib/drive-page';
 import { isLinkPage, findPageContext } from '../lib/sync-merge';
 import { moveNotebook, moveTab, movePage } from '../lib/nav-move';
 import { useViewport } from './useViewport';
@@ -236,12 +237,18 @@ export function useAppActions() {
     syncSubtree(newData, { notebookId: activeNotebookId, tabId: newTab.id, pageId: newPage.id });
   }, [activeNotebookId, saveToHistory, data.notebooks, commit, showNotification, syncSubtree, setActiveTabId, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId]);
 
-  const addPageOfType = useCallback(
-    (newPage, label, { focusTitle = false } = {}) => {
-      if (!activeTabId) return;
+  /**
+   * Add several pages to the active tab in ONE commit. `commit` applies the
+   * updater to the closed-over `data`, so calling addPageOfType N times in a
+   * single tick would persist a snapshot missing N-1 pages.
+   */
+  const addPagesOfType = useCallback(
+    (newPages, label, { focusTitle = false } = {}) => {
+      const pages = (newPages || []).filter(Boolean);
+      if (!activeTabId || pages.length === 0) return;
       saveToHistory();
-      const newData = commit((base) => addPageToTab(base, activeNotebookId, activeTabId, newPage));
-      setActivePageId(newPage.id);
+      const newData = commit((base) => pages.reduce((acc, page) => addPageToTab(acc, activeNotebookId, activeTabId, page), base));
+      setActivePageId(pages[0].id);
       if (isMobile) setMobilePane('editor');
       if (focusTitle) {
         setEditingPageId(null);
@@ -249,10 +256,15 @@ export function useAppActions() {
         setEditingNotebookId(null);
         setShouldFocusTitle(true);
       }
-      showNotification(label, 'success');
-      syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageId: newPage.id });
+      if (label) showNotification(label, 'success');
+      syncSubtree(newData, { notebookId: activeNotebookId, tabId: activeTabId, pageIds: pages.map((p) => p.id) });
     },
     [activeTabId, activeNotebookId, saveToHistory, commit, showNotification, syncSubtree, setActivePageId, setEditingPageId, setEditingTabId, setEditingNotebookId, setShouldFocusTitle, isMobile, setMobilePane]
+  );
+
+  const addPageOfType = useCallback(
+    (newPage, label, options = {}) => addPagesOfType([newPage], label, options),
+    [addPagesOfType]
   );
 
   const addPage = useCallback(() => addPageOfType(createDefaultPage(), 'Page created', { focusTitle: true }), [addPageOfType]);
@@ -260,114 +272,42 @@ export function useAppActions() {
   const addDatabasePage = useCallback(() => addPageOfType(createDatabasePage(), 'Database page created'), [addPageOfType]);
   const addCodePage = useCallback(() => addPageOfType(createCodePage(), 'Code page created'), [addPageOfType]);
 
+  /**
+   * Create a link page from a pasted URL. `resolved` (optional) comes from
+   * resolvePastedDriveUrl in the Drive & URL modal and carries the parsed URL,
+   * Drive metadata when the file is readable, and the name the user settled on.
+   */
   const addEmbedPageFromUrl = useCallback(
-    (rawUrl) => {
+    (rawUrl, resolved = null) => {
       if (!activeTabId || !rawUrl) return false;
-      const parsed = parseEmbedUrl(rawUrl);
+      const parsed = resolved?.parsed || parseEmbedUrl(rawUrl);
       if (!parsed) {
         showNotification('Could not parse Google Drive, PDF, or Web Board URL', 'error');
         return false;
       }
-      const pageName = parsed.isGoogleService
-        ? (parsed.type === 'site' ? 'Google Site' : `Google ${parsed.typeName}`)
-        : parsed.typeName;
-      const newPage = {
-        id: generateId(),
-        name: pageName,
-        type: parsed.type,
-        embedUrl: parsed.embedUrl,
-        ...(parsed.fileId && { driveFileId: parsed.fileId }),
-        webViewLink: rawUrl,
-        ...(parsed.originalUrl && { originalUrl: parsed.originalUrl }),
-        ...(parsed.type === 'pdf' && !parsed.fileId && !parsed.originalUrl && { originalUrl: rawUrl }),
-        icon: parsed.icon,
-        createdAt: Date.now(),
-        modifiedAt: Date.now(),
-      };
-      addPageOfType(newPage, `${pageName} added`);
+      const newPage = buildPageFromParsedUrl(rawUrl, parsed, {
+        name: resolved?.name,
+        mimeType: resolved?.meta?.mimeType,
+      });
+      addPageOfType(newPage, `${newPage.name} added`);
       return true;
     },
     [activeTabId, showNotification, addPageOfType]
   );
 
-  const addGooglePage = useCallback(
-    (file) => {
-      if (!activeTabId || !file) return;
-      let icon, typeName, pageType;
-      const mimeType = file.mimeType || '';
-      if (mimeType === 'application/vnd.google-apps.document') {
-        icon = '📄';
-        typeName = 'Doc';
-        pageType = 'doc';
-      } else if (mimeType === 'application/vnd.google-apps.spreadsheet') {
-        icon = '📊';
-        typeName = 'Sheet';
-        pageType = 'sheet';
-      } else if (mimeType === 'application/vnd.google-apps.presentation') {
-        icon = '📽️';
-        typeName = 'Slides';
-        pageType = 'slide';
-      } else if (mimeType === 'application/vnd.google-apps.form') {
-        icon = '📋';
-        typeName = 'Form';
-        pageType = 'form';
-      } else if (mimeType === 'application/vnd.google-apps.drawing') {
-        icon = '🖌️';
-        typeName = 'Drawing';
-        pageType = 'drawing';
-      } else if (mimeType === 'application/vnd.google-apps.map') {
-        icon = '🗺️';
-        typeName = 'Map';
-        pageType = 'map';
-      } else if (mimeType === 'application/vnd.google-apps.site') {
-        icon = '🌐';
-        typeName = 'Site';
-        pageType = 'site';
-      } else if (mimeType === 'application/vnd.google-apps.script') {
-        icon = '📜';
-        typeName = 'Apps Script';
-        pageType = 'script';
-      } else if (mimeType === 'application/vnd.google-apps.vid') {
-        icon = '🎬';
-        typeName = 'Vid';
-        pageType = 'vid';
-      } else if (mimeType === 'application/pdf') {
-        icon = '📑';
-        typeName = 'PDF';
-        pageType = 'pdf';
-      } else {
-        icon = '📁';
-        typeName = 'File';
-        pageType = 'drive';
-      }
-      let embedUrl;
-      if (pageType === 'doc') embedUrl = `https://docs.google.com/document/d/${file.id}/edit`;
-      else if (pageType === 'sheet') embedUrl = `https://docs.google.com/spreadsheets/d/${file.id}/edit`;
-      else if (pageType === 'slide') embedUrl = `https://docs.google.com/presentation/d/${file.id}/edit`;
-      else if (pageType === 'form') embedUrl = `https://docs.google.com/forms/d/${file.id}/viewform`;
-      else if (pageType === 'drawing') embedUrl = `https://docs.google.com/drawings/d/${file.id}/edit`;
-      else if (pageType === 'map') embedUrl = `https://www.google.com/maps/d/embed?mid=${file.id}`;
-      else if (pageType === 'site') embedUrl = (file.webViewLink || file.url || '').split('?')[0] || `https://drive.google.com/file/d/${file.id}/preview`;
-      else if (pageType === 'script') embedUrl = `https://script.google.com/macros/s/${file.id}/edit`;
-      else if (pageType === 'vid') embedUrl = `https://vids.google.com/watch/${file.id}`;
-      else embedUrl = `https://drive.google.com/file/d/${file.id}/preview`;
-
-      const newPage = {
-        id: generateId(),
-        name: file.name || `Google ${typeName}`,
-        type: pageType,
-        embedUrl,
-        driveFileId: file.id,
-        webViewLink: file.webViewLink || file.url,
-        mimeType: file.mimeType,
-        icon,
-        createdAt: Date.now(),
-        modifiedAt: Date.now(),
-      };
-      addPageOfType(newPage, `${file.name || 'Google ' + typeName} added`);
+  /** One page per file picked in the Drive browser, committed together. */
+  const addGooglePages = useCallback(
+    (files) => {
+      const list = (Array.isArray(files) ? files : [files]).filter(Boolean);
+      if (!activeTabId || list.length === 0) return;
+      const pages = list.map((file) => buildDrivePage(file));
+      const label = pages.length === 1 ? `${pages[0].name} added` : `${pages.length} pages added`;
+      addPagesOfType(pages, label);
     },
-    [activeTabId, addPageOfType]
+    [activeTabId, addPagesOfType]
   );
+
+  const addGooglePage = useCallback((file) => addGooglePages(file ? [file] : []), [addGooglePages]);
 
   const executeDelete = useCallback(
     async (type, id) => {
@@ -894,6 +834,8 @@ export function useAppActions() {
     addCodePage,
     addEmbedPageFromUrl,
     addGooglePage,
+    addGooglePages,
+    addPagesOfType,
     executeDelete,
     confirmDelete,
     updateLocalName,

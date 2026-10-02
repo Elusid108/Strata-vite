@@ -17,11 +17,12 @@
 // Google API Helper Module for Strata
 // Handles authentication, Drive API operations, and Picker integration
 
-import { CLIENT_ID, API_KEY, SCOPES } from './config';
+import { CLIENT_ID, API_KEY, APP_ID, SCOPES } from './config';
 import { DEBUG_SYNC, APP_VERSION, LINK_PAGE_TYPES } from './constants';
 import { pageFromDriveJson } from './sync-merge';
 import { applyIndexOrder } from './sync-pull';
 import { getDriveErrorMessage } from './sync-errors';
+import { mergePickedDocs, pickerViewSpecs } from './drive-page';
 
 /**
  * @typedef {Object} StrataNode
@@ -735,6 +736,7 @@ const buildLinkJsonContent = (page) => ({
     webViewLink: page.webViewLink,
     originalUrl: page.originalUrl,
     driveFileId: page.driveFileId,
+    mimeType: page.mimeType,
     starred: page.starred || false,
     createdAt: page.createdAt,
     modifiedAt: page.modifiedAt || Date.now()
@@ -1427,86 +1429,102 @@ const getFileContent = async (fileId) => {
 
 // ===== Picker API Functions =====
 
-// Show Google Drive Picker
-// mimeTypeFilter: optional MIME type to filter files (e.g., 'application/vnd.google-apps.document')
-const showDrivePicker = (callback, mimeTypeFilter = null) => {
+// Metadata for any Drive file the app is allowed to see. Under the drive.file
+// scope that means files Strata created or the user picked through the Picker
+// (with setAppId). Returns null when Drive will not describe the file (403/404)
+// so callers can fall back to a generic name instead of failing.
+const getDriveFileMetadata = async (fileId) => {
+    if (!fileId) return null;
+    await ensureAuthenticated();
+    try {
+        const response = await gapi.client.drive.files.get({
+            fileId,
+            fields: 'id, name, mimeType, webViewLink, iconLink',
+            supportsAllDrives: true,
+        });
+        return response.result || null;
+    } catch (error) {
+        const status = error?.status || error?.result?.error?.code;
+        if (status === 404 || status === 403) return null;
+        if (status === 401) {
+            await handleTokenExpiration();
+            throw new Error('Authentication expired');
+        }
+        throw error;
+    }
+};
+
+let warnedPickerAppId = false;
+
+/**
+ * Open the Google Picker.
+ *
+ * options:
+ *   mimeTypes  string[] | string  restrict to these types (folders stay navigable)
+ *   startIn    'recent' | 'mine' | 'drive' | 'shared' | 'drives' | 'starred'  first tab
+ *   query      string             pre-fill the Picker search box
+ *   multiple   boolean            allow picking several files; callback gets an array
+ *   title      string
+ *
+ * A plain string second argument is treated as `mimeTypes` for older callers.
+ * Every tab is shown in list mode (owner + last-modified columns) and Shared
+ * drives are included so corporate files can be browsed, not just searched.
+ */
+const showDrivePicker = (callback, options = {}) => {
     if (typeof google === 'undefined' || !google.picker) {
         console.error('Google Picker API not loaded');
         return;
     }
-
     if (!accessToken) {
         console.error('Not authenticated');
         return;
     }
+    const opts = typeof options === 'string' || Array.isArray(options) ? { mimeTypes: options } : (options || {});
+    const { startIn = 'recent', mimeTypes = [], query = '', multiple = false, title = 'Choose from Google Drive' } = opts;
 
-    // Recent files view (default/first view)
-    const recentView = new google.picker.DocsView(google.picker.ViewId.RECENTLY_PICKED);
-    recentView.setIncludeFolders(false);
-    
-    // My Drive view
-    const myDriveView = new google.picker.DocsView();
-    myDriveView.setIncludeFolders(true);
-    myDriveView.setSelectFolderEnabled(false);
-    
-    // Shared with Me view
-    const sharedView = new google.picker.DocsView();
-    sharedView.setOwnedByMe(false);
-    sharedView.setIncludeFolders(true);
-    
-    // Starred view
-    const starredView = new google.picker.DocsView();
-    starredView.setStarred(true);
-    starredView.setIncludeFolders(true);
-    
-    // Apply MIME type filter if provided
-    if (mimeTypeFilter) {
-        recentView.setMimeTypes(mimeTypeFilter);
-        myDriveView.setMimeTypes(mimeTypeFilter);
-        sharedView.setMimeTypes(mimeTypeFilter);
-        starredView.setMimeTypes(mimeTypeFilter);
-    }
+    const views = pickerViewSpecs({ startIn, mimeTypes, query }).map((spec) => {
+        const view = spec.viewId
+            ? new google.picker.DocsView(google.picker.ViewId[spec.viewId] || google.picker.ViewId.DOCS)
+            : new google.picker.DocsView();
+        view.setIncludeFolders(spec.includeFolders);
+        view.setSelectFolderEnabled(false);
+        if (spec.ownedByMe !== undefined) view.setOwnedByMe(spec.ownedByMe);
+        if (spec.enableDrives) view.setEnableDrives(true);
+        if (spec.starred) view.setStarred(true);
+        if (spec.mode === 'list' && google.picker.DocsViewMode?.LIST) view.setMode(google.picker.DocsViewMode.LIST);
+        if (spec.mimeTypes.length) view.setMimeTypes(spec.mimeTypes.join(','));
+        if (spec.query) view.setQuery(spec.query);
+        const label = { recent: 'Recent', mine: 'My files', drive: 'My Drive', shared: 'Shared with me', drives: 'Shared drives', starred: 'Starred' }[spec.key];
+        if (label && typeof view.setLabel === 'function') view.setLabel(label);
+        return view;
+    });
 
-    const picker = new google.picker.PickerBuilder()
-        .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+    const builder = new google.picker.PickerBuilder()
+        .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
         .setOAuthToken(accessToken)
         .setDeveloperKey(API_KEY)
-        .setCallback((data) => {
-            if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
-                const docs = data[google.picker.Response.DOCUMENTS];
-                if (docs && docs.length > 0 && callback) {
-                    // Get file details from Drive API
-                    gapi.client.drive.files.get({
-                        fileId: docs[0].id,
-                        fields: 'id, name, mimeType, webViewLink'
-                    }).then(response => {
-                        callback({
-                            id: response.result.id,
-                            name: response.result.name,
-                            mimeType: response.result.mimeType,
-                            webViewLink: response.result.webViewLink,
-                            url: response.result.webViewLink
-                        });
-                    }).catch(error => {
-                        console.error('Error getting file details:', error);
-                        // Fallback to basic info
-                        callback({
-                            id: docs[0].id,
-                            name: docs[0].name,
-                            mimeType: docs[0].mimeType,
-                            url: docs[0].url
-                        });
-                    });
-                }
-            }
-        })
-        .addView(recentView)   // Recent files shown first
-        .addView(myDriveView)  // My Drive
-        .addView(sharedView)   // Shared with Me
-        .addView(starredView)  // Starred files
-        .build();
+        .setTitle(title);
+    if (multiple) builder.enableFeature(google.picker.Feature.MULTISELECT_ENABLED);
+    // Required with the drive.file scope: without the project number the picked
+    // files are never granted to the app and every files.get on them 404s.
+    if (APP_ID) builder.setAppId(String(APP_ID));
+    if (typeof window !== 'undefined' && window.location?.origin) builder.setOrigin(window.location.origin);
+    for (const view of views) builder.addView(view);
 
-    picker.setVisible(true);
+    builder.setCallback(async (data) => {
+        if (data[google.picker.Response.ACTION] !== google.picker.Action.PICKED) return;
+        const docs = data[google.picker.Response.DOCUMENTS] || [];
+        if (!docs.length || !callback) return;
+        const settled = await Promise.allSettled(docs.map((doc) => getDriveFileMetadata(doc.id)));
+        if (APP_ID && !warnedPickerAppId && settled.every((r) => r.status !== 'fulfilled' || !r.value)) {
+            warnedPickerAppId = true;
+            console.warn(`Drive would not describe any picked file. Check that VITE_GOOGLE_APP_ID / the client ID prefix (${APP_ID}) is this project's Cloud project number.`);
+        }
+        const files = mergePickedDocs(docs, settled);
+        callback(multiple ? files : files[0]);
+    });
+
+    builder.build().setVisible(true);
 };
 
 // ===== Portable Backup Functions =====
@@ -1578,6 +1596,7 @@ export {
     getUserInfo,
     getOrCreateRootFolder,
     showDrivePicker,
+    getDriveFileMetadata,
     getFileEtag,
     findFileByAppId,
     createFolderWithAppId,
@@ -1614,6 +1633,7 @@ export default {
     getUserInfo,
     getOrCreateRootFolder,
     showDrivePicker,
+    getDriveFileMetadata,
     getFileEtag,
     findFileByAppId,
     createFolderWithAppId,

@@ -1,17 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  PICKER_START_VIEWS,
-  PICKER_TYPE_FILTERS,
   buildDrivePage,
   buildEmbedUrlForDriveFile,
   buildPageFromParsedUrl,
   defaultPageNameFor,
   mergePickedDocs,
-  mimeTypesForFilter,
   pickerViewSpecs,
-  readPickerPrefs,
   resolvePastedDriveUrl,
-  writePickerPrefs,
 } from './drive-page';
 import { parseEmbedUrl } from './embed-utils';
 
@@ -138,7 +133,7 @@ describe('pickerViewSpecs', () => {
   it('puts the requested start view first and keeps all six', () => {
     const keys = pickerViewSpecs({ startIn: 'drives' }).map((s) => s.key);
     expect(keys[0]).toBe('drives');
-    expect([...keys].sort()).toEqual(PICKER_START_VIEWS.map((v) => v.key).sort());
+    expect([...keys].sort()).toEqual(['drive', 'drives', 'mine', 'recent', 'shared', 'starred']);
     expect(pickerViewSpecs({ startIn: 'nope' })[0].key).toBe('recent');
   });
 
@@ -160,25 +155,6 @@ describe('pickerViewSpecs', () => {
     }
     expect(pickerViewSpecs({ mimeTypes: `${DOC},${SHEET}` })[0].mimeTypes).toEqual([DOC, SHEET, FOLDER]);
     expect(pickerViewSpecs()[0].mimeTypes).toEqual([]);
-  });
-
-  it('maps filter keys to mime lists', () => {
-    expect(mimeTypesForFilter('sheets')).toEqual([SHEET]);
-    expect(mimeTypesForFilter('all')).toEqual([]);
-    expect(mimeTypesForFilter('bogus')).toEqual([]);
-    expect(PICKER_TYPE_FILTERS.map((f) => f.key)).toContain('pdf');
-  });
-});
-
-describe('picker prefs', () => {
-  it('round-trips and falls back on bad or unknown values', () => {
-    expect(readPickerPrefs()).toEqual({ startIn: 'recent', typeFilter: 'all' });
-    writePickerPrefs({ startIn: 'drives', typeFilter: 'sheets' });
-    expect(readPickerPrefs()).toEqual({ startIn: 'drives', typeFilter: 'sheets' });
-    localStorage.setItem('strata_picker_prefs', '{not json');
-    expect(readPickerPrefs()).toEqual({ startIn: 'recent', typeFilter: 'all' });
-    localStorage.setItem('strata_picker_prefs', JSON.stringify({ startIn: 'mars', typeFilter: 'sheets' }));
-    expect(readPickerPrefs()).toEqual({ startIn: 'recent', typeFilter: 'sheets' });
   });
 });
 

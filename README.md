@@ -25,7 +25,7 @@ Created by **Chris Moore Designs LLC**.
 
 ### 🔗 Deep Google Drive Integration
 * **Unified Embed Engine:** Paste links to seamlessly embed Google Drive files (Docs, Sheets, Slides, Forms, etc.), PDFs, Lucidchart diagrams, Miro boards, and Draw.io canvases directly into your workspace. Pasted Google links pick up the file's real name as the page name whenever Drive lets Strata see the file (files Strata created or that you picked in the browser); otherwise you type one.
-* **Drive browser built for big Drives:** Separate tabs for Recent, My files (only what you own), My Drive, Shared with me, Shared drives and Starred, all in list view with owner and last-modified columns. Filter to Docs, Sheets, Slides, Forms or PDFs, seed a search, and pick several files at once to add them all as pages. Your last tab and filter are remembered.
+* **Drive browser built for big Drives:** Separate tabs for Recent, My files (only what you own), My Drive, Shared with me, Shared drives and Starred, all in list view with owner and last-modified columns. Pick several files at once to add them all as pages.
 * **Native Embeds:** Embed Google Docs, Sheets, Slides, Forms, Drawings, Videos, and PDFs directly into your notebooks.
 * **Background Tabs:** Embedded pages remain alive in the background when navigating away, ensuring instant load times and preserved state (like switching Chrome tabs) when you return.
 * **Drive File Blocks:** Link directly to Drive files within your block pages, displaying real-time file names, types, and open/remove controls.

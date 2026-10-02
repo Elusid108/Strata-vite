@@ -17,33 +17,6 @@ const GOOGLE_MIME = {
   pdf: 'application/pdf',
 };
 
-/** Picker tabs, in default order. `startIn` moves one of them to the front. */
-export const PICKER_START_VIEWS = [
-  { key: 'recent', label: 'Recent', hint: 'Files you opened or picked recently' },
-  { key: 'mine', label: 'My files', hint: 'Only files you own (no corporate items)' },
-  { key: 'drive', label: 'My Drive', hint: 'Everything in My Drive, including shared folders added to it' },
-  { key: 'shared', label: 'Shared with me', hint: 'Files other people shared with you' },
-  { key: 'drives', label: 'Shared drives', hint: 'Team / corporate shared drives' },
-  { key: 'starred', label: 'Starred', hint: 'Files you starred in Drive' },
-];
-
-/** Quick type filters. Folders are always included so you can navigate. */
-export const PICKER_TYPE_FILTERS = [
-  { key: 'all', label: 'All types', mimeTypes: [] },
-  { key: 'docs', label: 'Docs', mimeTypes: [GOOGLE_MIME.doc] },
-  { key: 'sheets', label: 'Sheets', mimeTypes: [GOOGLE_MIME.sheet] },
-  { key: 'slides', label: 'Slides', mimeTypes: [GOOGLE_MIME.slide] },
-  { key: 'forms', label: 'Forms', mimeTypes: [GOOGLE_MIME.form] },
-  { key: 'pdf', label: 'PDFs', mimeTypes: [GOOGLE_MIME.pdf] },
-];
-
-export const DEFAULT_PICKER_PREFS = { startIn: 'recent', typeFilter: 'all' };
-const PICKER_PREFS_KEY = 'strata_picker_prefs';
-
-export function mimeTypesForFilter(filterKey) {
-  return PICKER_TYPE_FILTERS.find((f) => f.key === filterKey)?.mimeTypes || [];
-}
-
 /**
  * Ordered, plain descriptions of the Picker views. google-api.js turns them
  * into DocsView instances. Keeping this pure lets ordering and filters be tested.
@@ -72,27 +45,6 @@ export function pickerViewSpecs({ startIn = 'recent', mimeTypes = [], query = ''
     specs.unshift(first);
   }
   return specs;
-}
-
-export function readPickerPrefs() {
-  try {
-    const raw = localStorage.getItem(PICKER_PREFS_KEY);
-    if (!raw) return { ...DEFAULT_PICKER_PREFS };
-    const parsed = JSON.parse(raw);
-    const startIn = PICKER_START_VIEWS.some((v) => v.key === parsed?.startIn) ? parsed.startIn : DEFAULT_PICKER_PREFS.startIn;
-    const typeFilter = PICKER_TYPE_FILTERS.some((f) => f.key === parsed?.typeFilter) ? parsed.typeFilter : DEFAULT_PICKER_PREFS.typeFilter;
-    return { startIn, typeFilter };
-  } catch {
-    return { ...DEFAULT_PICKER_PREFS };
-  }
-}
-
-export function writePickerPrefs(prefs) {
-  try {
-    localStorage.setItem(PICKER_PREFS_KEY, JSON.stringify({ ...DEFAULT_PICKER_PREFS, ...prefs }));
-  } catch {
-    /* storage disabled */
-  }
 }
 
 /** Embed URL for a Drive file of a known page type. Sites embed their own web URL. */

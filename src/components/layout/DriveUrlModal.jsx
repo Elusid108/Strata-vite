@@ -1,28 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { DRIVE_LOGO_URL, DRIVE_SERVICE_ICONS } from '../../lib/constants';
 import * as GoogleAPI from '../../lib/google-api';
-import { FolderOpen, Loader, Search, X } from '../icons';
+import { FolderOpen, Loader, X } from '../icons';
 import { useStrata } from '../../contexts/StrataContext';
 import { useAppActions } from '../../hooks/useAppActions';
-import {
-  PICKER_START_VIEWS,
-  PICKER_TYPE_FILTERS,
-  mimeTypesForFilter,
-  readPickerPrefs,
-  resolvePastedDriveUrl,
-  writePickerPrefs,
-} from '../../lib/drive-page';
+import { resolvePastedDriveUrl } from '../../lib/drive-page';
 import { detectPageTypeFromMimeType, getTypeDisplayName } from '../../lib/embed-utils';
 
 const LOOKUP_DEBOUNCE_MS = 400;
 const LOOKUP_WAIT_MS = 1500;
-
-const chipClass = (active) =>
-  `px-2.5 py-1 rounded-full text-xs border transition-colors ${
-    active
-      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-      : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-  }`;
 
 function foundTypeLabel(resolved) {
   const mime = resolved?.meta?.mimeType;
@@ -42,8 +28,6 @@ export function DriveUrlModal() {
   const { driveUrlModalValue, setDriveUrlModalValue, setShowDriveUrlModal, showNotification, isAuthenticated } = useStrata();
   const { addEmbedPageFromUrl, addGooglePages } = useAppActions();
 
-  const [prefs, setPrefs] = useState(() => readPickerPrefs());
-  const [pickerQuery, setPickerQuery] = useState('');
   const [nameValue, setNameValue] = useState('');
   const [resolved, setResolved] = useState(null);
   const [resolving, setResolving] = useState(false);
@@ -85,7 +69,6 @@ export function DriveUrlModal() {
   };
 
   const openPicker = () => {
-    writePickerPrefs(prefs);
     if (typeof GoogleAPI === 'undefined' || !GoogleAPI.showDrivePicker) {
       showNotification('Drive Picker not available', 'error');
       return;
@@ -93,9 +76,6 @@ export function DriveUrlModal() {
     // Close first: the Picker renders below this dialog's z-index.
     close();
     GoogleAPI.showDrivePicker((files) => addGooglePages(files), {
-      startIn: prefs.startIn,
-      mimeTypes: mimeTypesForFilter(prefs.typeFilter),
-      query: pickerQuery.trim(),
       multiple: true,
       title: 'Add Drive files to Strata',
     });
@@ -174,48 +154,6 @@ export function DriveUrlModal() {
           <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Browse Google Drive</label>
           {isAuthenticated ? (
             <>
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Start in</div>
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {PICKER_START_VIEWS.map((view) => (
-                  <button
-                    key={view.key}
-                    type="button"
-                    title={view.hint}
-                    onClick={() => setPrefs((p) => ({ ...p, startIn: view.key }))}
-                    className={chipClass(prefs.startIn === view.key)}
-                  >
-                    {view.label}
-                  </button>
-                ))}
-              </div>
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 mb-1">Show only</div>
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {PICKER_TYPE_FILTERS.map((filter) => (
-                  <button
-                    key={filter.key}
-                    type="button"
-                    onClick={() => setPrefs((p) => ({ ...p, typeFilter: filter.key }))}
-                    className={chipClass(prefs.typeFilter === filter.key)}
-                  >
-                    {filter.label}
-                  </button>
-                ))}
-              </div>
-              <div className="relative mb-3">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  className="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-white"
-                  placeholder="Search for a file name (optional)"
-                  value={pickerQuery}
-                  onChange={(e) => setPickerQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      openPicker();
-                    } else if (e.key === 'Escape') close();
-                  }}
-                />
-              </div>
               <button
                 type="button"
                 onClick={openPicker}
@@ -224,7 +162,7 @@ export function DriveUrlModal() {
                 <FolderOpen size={18} /> Open Drive browser
               </button>
               <p className="text-xs text-gray-400 mt-2">
-                Shared drives, Shared with me and My files are separate tabs. List view shows owner and last modified. Pick several files to add them all at once.
+                Browse Recent, My files, My Drive, Shared with me, Shared drives and Starred. Pick several files to add them all at once.
               </p>
             </>
           ) : (

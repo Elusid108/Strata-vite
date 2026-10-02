@@ -376,16 +376,17 @@ export function useAppActions() {
       // Link pages point at a file the user owns elsewhere in Drive (Doc, My Map, PDF...).
       // Only the Strata link JSON may ever be trashed, never the linked file itself.
       const getPageDeleteId = (page) => (isLinkPage(page) ? page.driveLinkFileId || null : page.driveFileId || null);
+      // Names ride along so the sync panel can still describe the delete after the item is gone locally.
       const collectDriveIds = (item, itemType) => {
         if (itemType === 'notebook') {
-          if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
+          if (item.driveFolderId) driveIdsToDelete.push({ driveId: item.driveFolderId, name: item.name });
           for (const tab of item.tabs || []) collectDriveIds(tab, 'tab');
         } else if (itemType === 'tab') {
-          if (item.driveFolderId) driveIdsToDelete.push(item.driveFolderId);
+          if (item.driveFolderId) driveIdsToDelete.push({ driveId: item.driveFolderId, name: item.name });
           for (const page of item.pages || []) collectDriveIds(page, 'page');
         } else if (itemType === 'page') {
           const delId = getPageDeleteId(item);
-          if (delId) driveIdsToDelete.push(delId);
+          if (delId) driveIdsToDelete.push({ driveId: delId, name: item.name });
         }
       };
 

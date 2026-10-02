@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, X } from '../../components/icons';
+import { AlertCircle, ArrowRight, Redo, X } from '../../components/icons';
 import { describeSyncOp, formatLastSyncTime, formatSyncProgress } from '../../lib/sync-status';
+import { describeSkipConsequence, describeSyncError, skipNeedsConfirm } from '../../lib/sync-errors';
 
 function phaseTitle(phase) {
   if (phase === 'connecting') return 'Connecting';
   if (phase === 'retrying') return 'Retrying';
+  if (phase === 'blocked') return 'Needs attention';
   if (phase === 'waiting') return 'Waiting';
   if (phase === 'syncing') return 'Syncing';
   if (phase === 'offline') return 'Offline';
@@ -12,10 +14,20 @@ function phaseTitle(phase) {
   return 'Synced';
 }
 
-export function SyncStatusPanel({ syncStatus, data, condensed, onClose, onSignIn }) {
+function skipReasonLabel(entry) {
+  if (entry.skipReason === 'permission') return 'Drive refused (no permission); left in Drive';
+  if (entry.skipReason === 'manual') return 'Skipped by you';
+  return 'Skipped';
+}
+
+const SKIP_CONFIRM_MS = 5000;
+
+export function SyncStatusPanel({ syncStatus, data, condensed, onClose, onSignIn, onRetryNow, onSkipCurrent, onDismissSkipped }) {
   const [now, setNow] = useState(Date.now());
+  const [confirmSkip, setConfirmSkip] = useState(false);
   const retryAt = syncStatus?.error?.retryAt;
   const phase = syncStatus?.phase || 'idle';
+  const currentOp = syncStatus?.currentOp || null;
 
   useEffect(() => {
     if (phase !== 'retrying' || !retryAt) return;
@@ -23,21 +35,45 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose, onSignIn
     return () => clearInterval(id);
   }, [phase, retryAt]);
 
+  // The "Skip anyway?" confirmation lapses after a few seconds or when the head op changes.
+  useEffect(() => {
+    if (!confirmSkip) return;
+    const id = setTimeout(() => setConfirmSkip(false), SKIP_CONFIRM_MS);
+    return () => clearTimeout(id);
+  }, [confirmSkip]);
+  useEffect(() => {
+    setConfirmSkip(false);
+  }, [currentOp?.id]);
+
   const progress = formatSyncProgress(syncStatus);
   const remaining = syncStatus?.remaining || 0;
   const completed = syncStatus?.completed || 0;
   const total = remaining > 0 ? completed + remaining : completed;
   const percent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : (phase === 'idle' ? 100 : 0);
-  const currentLabel = describeSyncOp(syncStatus?.currentOp, data);
+  const currentLabel = describeSyncOp(currentOp, data);
   const upcoming = (syncStatus?.queue || []).slice(1, 16);
   const retryIn = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
-  const isError = phase === 'retrying' || phase === 'signin-required' || (phase === 'idle' && syncStatus?.error);
+  const isError = phase === 'retrying' || phase === 'blocked' || phase === 'signin-required' || (phase === 'idle' && syncStatus?.error);
+  const canAct = (phase === 'retrying' || phase === 'blocked') && !!currentOp;
+  const error = syncStatus?.error;
+  const hint = error ? describeSyncError({ kind: error.reason, attempts: error.attempts }) : null;
+  const skipped = syncStatus?.skipped || [];
+  const skipConsequence = currentOp ? describeSkipConsequence(currentOp, currentOp.name || describeSyncOp(currentOp, data).split(': ').slice(1).join(': ')) : null;
+
+  const handleSkip = () => {
+    if (skipNeedsConfirm(currentOp) && !confirmSkip) {
+      setConfirmSkip(true);
+      return;
+    }
+    setConfirmSkip(false);
+    onSkipCurrent?.();
+  };
 
   return (
     <div
-      className={`absolute z-40 max-h-80 overflow-hidden flex flex-col rounded-lg border bg-white dark:bg-gray-800 shadow-lg min-w-0 ${
+      className={`absolute z-40 max-h-96 overflow-hidden flex flex-col rounded-lg border bg-white dark:bg-gray-800 shadow-lg min-w-0 ${
         isError ? 'border-amber-400 dark:border-amber-600' : 'border-gray-200 dark:border-gray-700'
-      } ${condensed ? 'bottom-12 left-full ml-1 w-56' : 'left-0 right-0 bottom-full mb-1 w-auto'}`}
+      } ${condensed ? 'bottom-12 left-full ml-1 w-64' : 'left-0 right-0 bottom-full mb-1 w-auto'}`}
       role="dialog"
       aria-label="Sync status"
     >
@@ -84,7 +120,7 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose, onSignIn
             Waiting for Drive… {currentLabel}
           </div>
         )}
-        {(phase === 'syncing' || phase === 'retrying') && syncStatus?.currentOp && (
+        {(phase === 'syncing' || phase === 'retrying' || phase === 'blocked') && currentOp && (
           <div className="text-gray-800 dark:text-gray-100 font-medium truncate" title={currentLabel}>
             {currentLabel}
           </div>
@@ -94,16 +130,51 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose, onSignIn
         )}
       </div>
 
-      {syncStatus?.error && phase !== 'signin-required' && (
+      {error && phase !== 'signin-required' && (
         <div className="px-3 py-2 text-xs bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border-b border-amber-100 dark:border-amber-900">
           <div className="flex items-start gap-1.5 min-w-0">
             <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
-            <div className="min-w-0">
-              <div className="font-medium">Sync error{syncStatus.error.status ? ` (${syncStatus.error.status})` : ''}</div>
-              <div className="break-words">{syncStatus.error.message}</div>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">
+                Sync error{error.status ? ` (${error.status})` : ''}
+                {error.attempts > 1 ? ` · attempt ${error.attempts}` : ''}
+              </div>
+              <div className="break-words">{error.message}</div>
+              {hint && <div className="mt-1 text-amber-700 dark:text-amber-300">{hint}</div>}
               {phase === 'retrying' && retryAt && (
                 <div className="mt-1 text-amber-700 dark:text-amber-300">
                   {retryIn > 0 ? `Retrying in ${retryIn}s` : 'Retrying...'}
+                </div>
+              )}
+              {phase === 'blocked' && (
+                <div className="mt-1 text-amber-700 dark:text-amber-300">Sync is paused on this change until you retry or skip it.</div>
+              )}
+              {canAct && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={onRetryNow}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    <Redo size={11} /> Retry now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSkip}
+                    title={skipConsequence || undefined}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded border ${
+                      confirmSkip
+                        ? 'border-red-400 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 dark:border-red-700'
+                        : 'border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40'
+                    }`}
+                  >
+                    <ArrowRight size={11} /> {confirmSkip ? 'Skip anyway?' : 'Skip this change'}
+                  </button>
+                </div>
+              )}
+              {canAct && skipConsequence && (
+                <div className={`mt-1 text-[10px] ${confirmSkip ? 'text-red-700 dark:text-red-300' : 'text-amber-700/80 dark:text-amber-300/80'}`}>
+                  {confirmSkip ? `If you skip: ${skipConsequence}` : `Skipping: ${skipConsequence}`}
                 </div>
               )}
             </div>
@@ -111,19 +182,50 @@ export function SyncStatusPanel({ syncStatus, data, condensed, onClose, onSignIn
         </div>
       )}
 
-      {upcoming.length > 0 && (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 min-w-0">
-          <div className="text-[10px] font-semibold uppercase text-gray-400 mb-1">Up next ({remaining - 1} left)</div>
-          <ul className="space-y-1 min-w-0">
-            {upcoming.map((op) => (
-              <li key={op.id} className="text-xs text-gray-600 dark:text-gray-300 truncate" title={describeSyncOp(op, data)}>
-                {describeSyncOp(op, data)}
-              </li>
-            ))}
-            {remaining - 1 > upcoming.length && (
-              <li className="text-[10px] text-gray-400">+{remaining - 1 - upcoming.length} more</li>
-            )}
-          </ul>
+      {(upcoming.length > 0 || skipped.length > 0) && (
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-2 min-w-0 space-y-2">
+          {upcoming.length > 0 && (
+            <div>
+              <div className="text-[10px] font-semibold uppercase text-gray-400 mb-1">Up next ({remaining - 1} left)</div>
+              <ul className="space-y-1 min-w-0">
+                {upcoming.map((op) => (
+                  <li key={op.id} className="text-xs text-gray-600 dark:text-gray-300 truncate" title={describeSyncOp(op, data)}>
+                    {describeSyncOp(op, data)}
+                  </li>
+                ))}
+                {remaining - 1 > upcoming.length && (
+                  <li className="text-[10px] text-gray-400">+{remaining - 1 - upcoming.length} more</li>
+                )}
+              </ul>
+            </div>
+          )}
+          {skipped.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[10px] font-semibold uppercase text-gray-400">Skipped</div>
+                {onDismissSkipped && (
+                  <button type="button" onClick={() => onDismissSkipped()} className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                    Clear
+                  </button>
+                )}
+              </div>
+              <ul className="space-y-1 min-w-0">
+                {skipped.map((entry) => (
+                  <li key={entry.id} className="flex items-start gap-1 text-xs text-gray-600 dark:text-gray-300 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate" title={describeSyncOp(entry, data)}>{describeSyncOp(entry, data)}</div>
+                      <div className="text-[10px] text-gray-400 truncate" title={entry.skipMessage || undefined}>{skipReasonLabel(entry)}</div>
+                    </div>
+                    {onDismissSkipped && (
+                      <button type="button" onClick={() => onDismissSkipped(entry.id)} className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0" title="Dismiss">
+                        <X size={10} />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -141,6 +243,7 @@ export function syncFooterLabel(syncStatus) {
   if (phase === 'connecting') return 'Connecting...';
   if (phase === 'offline') return progress ? `Offline · ${syncStatus.remaining} pending` : 'Offline';
   if (phase === 'signin-required') return 'Sign in required';
+  if (phase === 'blocked') return progress ? `Needs attention · ${syncStatus.remaining} pending` : 'Needs attention';
   if (phase === 'retrying') return progress ? `Retrying... ${progress}` : 'Retrying...';
   if (phase === 'waiting') return progress ? `Waiting... ${progress}` : 'Waiting...';
   if (phase === 'syncing') return progress ? `Syncing... ${progress}` : 'Syncing...';

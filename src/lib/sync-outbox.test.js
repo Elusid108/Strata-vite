@@ -95,3 +95,47 @@ describe('buildIndexData', () => {
     expect(idx.pages).toEqual({ dt1: ['f1', 'l2'] });
   });
 });
+
+describe('trash names, failures and skips', () => {
+  it('stores the item name on a trash op and returns the ids', async () => {
+    const { enqueueTrash: trash, getSyncState: state } = await import('./sync-outbox');
+    const ids = trash([{ driveId: 'f1', name: 'Work' }, 'f2', { driveId: null, name: 'nope' }]);
+    expect(ids).toEqual(['f1', 'f2']);
+    const ops = state().ops;
+    expect(ops.find((o) => o.driveId === 'f1').name).toBe('Work');
+    expect(ops.find((o) => o.driveId === 'f2').name).toBeUndefined();
+  });
+
+  it('recordOpFailure increments attempts and persists the last error', async () => {
+    const { recordOpFailure } = await import('./sync-outbox');
+    const op = enqueueOp({ type: 'trash', driveId: 'f1' }, 'trash:f1');
+    expect(op.attempts).toBeUndefined();
+    const first = recordOpFailure(op.id, { status: 500, reason: 'backendError', message: 'boom' });
+    expect(first.attempts).toBe(1);
+    const second = recordOpFailure(op.id, { status: 500 });
+    expect(second.attempts).toBe(2);
+    expect(peekOp().attempts).toBe(2);
+    expect(peekOp().lastError.status).toBe(500);
+    expect(recordOpFailure('missing', {})).toBeNull();
+  });
+
+  it('coalescing a failed op yields a fresh op without attempts', async () => {
+    const { recordOpFailure } = await import('./sync-outbox');
+    const op = enqueueOp({ type: 'patchPage', pageId: 'p1' }, 'patch:p1');
+    recordOpFailure(op.id, { status: 500 });
+    enqueueOp({ type: 'patchPage', pageId: 'p1' }, 'patch:p1');
+    expect(peekOp().attempts).toBeUndefined();
+  });
+
+  it('skipOp removes the op but keeps the tombstone so the item stays hidden', async () => {
+    const { skipOp } = await import('./sync-outbox');
+    enqueueTrash([{ driveId: 'folder1', name: 'Work' }]);
+    const op = peekOp();
+    const removed = skipOp(op.id);
+    expect(removed.driveId).toBe('folder1');
+    expect(hasPendingOps()).toBe(false);
+    expect(tombstoneIdSet().has('folder1')).toBe(true);
+    expect(getSyncState().tombstones.find((t) => t.driveId === 'folder1').skippedAt).toBeTypeOf('number');
+    expect(skipOp('missing')).toBeNull();
+  });
+});

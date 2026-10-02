@@ -26,6 +26,9 @@ export function Sidebar({ variant = 'rail', onClose }) {
     showNotification,
     setShowSignOutConfirm,
     handleSignIn,
+    retryNow,
+    skipCurrentOp,
+    dismissSkipped,
     syncStatus,
     favoritesExpanded,
     setFavoritesExpanded,
@@ -77,7 +80,7 @@ export function Sidebar({ variant = 'rail', onClose }) {
   const syncPhase = syncStatus?.phase || 'idle';
   const syncLabel = syncFooterLabel(syncStatus);
   const syncBusy = syncPhase === 'syncing' || syncPhase === 'connecting' || syncPhase === 'waiting';
-  const syncRetrying = syncPhase === 'retrying' || syncPhase === 'signin-required';
+  const syncRetrying = syncPhase === 'retrying' || syncPhase === 'blocked' || syncPhase === 'signin-required';
   const syncOffline = syncPhase === 'offline';
 
   useEffect(() => {
@@ -158,7 +161,13 @@ export function Sidebar({ variant = 'rail', onClose }) {
             className={`flex items-center ${condensed ? 'justify-center' : 'gap-2'} p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer`}
             onClick={() => {
               if (hasUnsyncedChanges) {
-                showNotification('Please wait for sync to finish before signing out.', 'error');
+                const pending = syncStatus?.remaining || 0;
+                showNotification(
+                  pending > 0
+                    ? `${pending} change${pending === 1 ? ' is' : 's are'} still waiting to sync. Open sync status to retry or skip ${pending === 1 ? 'it' : 'them'} before signing out.`
+                    : 'Please wait for sync to finish before signing out.',
+                  'error'
+                );
                 return;
               }
               setShowSignOutConfirm(true);
@@ -363,6 +372,9 @@ export function Sidebar({ variant = 'rail', onClose }) {
             condensed={condensed}
             onClose={() => setShowSyncPanel(false)}
             onSignIn={handleSignIn}
+            onRetryNow={retryNow}
+            onSkipCurrent={skipCurrentOp}
+            onDismissSkipped={dismissSkipped}
           />
         )}
         {!isDrawer && !isTablet ? (

@@ -6,6 +6,8 @@ import {
   enqueueOp,
   enqueueTrash,
   peekOp,
+  recordOpFailure,
+  skipOp,
   hasPendingOps,
   persistNotebookData,
   installGuestWorkspace,
@@ -16,6 +18,7 @@ import {
   tombstoneIdSet,
 } from '../lib/sync-outbox';
 import { processSyncOp } from '../lib/sync-engine';
+import { classifyDriveError, MAX_AUTO_RETRIES } from '../lib/sync-errors';
 import { findPageContext, isLinkPage } from '../lib/sync-merge';
 import { applyDriveChanges, applyIndexOrder, planPageFetches } from '../lib/sync-pull';
 
@@ -36,16 +39,14 @@ function isOnline() {
 }
 
 function errorStatus(error) {
-  return error?.status || error?.result?.error?.code || null;
+  return classifyDriveError(error).status;
 }
 
 function isAuthError(error) {
-  return errorStatus(error) === 401 || /authentication|not authenticated/i.test(error?.message || '');
+  return classifyDriveError(error).kind === 'auth';
 }
 
-function isNetworkError(error) {
-  return error instanceof TypeError || /failed to fetch|network/i.test(error?.message || '');
-}
+const SKIPPED_HISTORY_LIMIT = 10;
 
 function enqueueMissingParent(op, data) {
   if (!op || !data) return;
@@ -107,6 +108,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     remaining: 0,
     queue: [],
     error: null,
+    skipped: [],
     lastSyncTime: null,
     lastPullTime: null,
   });
@@ -114,7 +116,10 @@ export function useGoogleDrive(data, setData, showNotification) {
   const workerLockRef = useRef(false);
   const pullLockRef = useRef(false);
   const backoffRef = useRef(1000);
-  const workerTimerRef = useRef(null);
+  const kickTimerRef = useRef(null); // debounce before a normal worker run
+  const retryTimerRef = useRef(null); // backoff before re-attempting a failed head op
+  const blockedRef = useRef(false); // head op needs the user (Retry now / Skip)
+  const skippedRef = useRef([]); // recent ops dropped without a Drive ACK, newest first
   const pendingKickRef = useRef(false);
   const pendingPullRef = useRef(false);
   const completedRef = useRef(0);
@@ -159,7 +164,13 @@ export function useGoogleDrive(data, setData, showNotification) {
       remaining: ops.length,
       currentOp: ops[0] || null,
       queue: ops.slice(0, 20),
+      skipped: skippedRef.current,
     }));
+  }, []);
+
+  const rememberSkipped = useCallback(({ op, reason, message }) => {
+    const entry = { ...op, skipReason: reason, skipMessage: message || null, skippedAt: Date.now() };
+    skippedRef.current = [entry, ...skippedRef.current.filter((e) => e.id !== op.id)].slice(0, SKIPPED_HISTORY_LIMIT);
   }, []);
 
   // ------------------------------------------------------------------
@@ -275,7 +286,11 @@ export function useGoogleDrive(data, setData, showNotification) {
   // ------------------------------------------------------------------
   // Push: serial outbox worker
   // ------------------------------------------------------------------
-  const runWorker = useCallback(async () => {
+  const runWorker = useCallback(async ({ force = false } = {}) => {
+    // While a backoff timer is pending or the head op is blocked, resumption
+    // belongs to the timer, Retry now, Skip, sign-in or coming back online.
+    // Ordinary kicks (edits, pulls, tab hide) must not bypass the backoff.
+    if (!force && (retryTimerRef.current || blockedRef.current)) return;
     if (workerLockRef.current || pullLockRef.current) {
       pendingKickRef.current = true;
       return;
@@ -292,9 +307,9 @@ export function useGoogleDrive(data, setData, showNotification) {
 
     workerLockRef.current = true;
     setIsSyncing(true);
-    completedRef.current = 0;
-    publishSyncStatus({ phase: 'syncing', completed: 0, error: null });
-    let retrying = false;
+    publishSyncStatus({ phase: 'syncing', completed: completedRef.current, error: null });
+    let paused = false;
+    let runSkipped = 0;
     try {
       while (true) {
         const op = peekOp();
@@ -308,6 +323,7 @@ export function useGoogleDrive(data, setData, showNotification) {
             error: null,
             lastSyncTime: syncedAt,
           });
+          completedRef.current = 0;
           break;
         }
         if (!isOnline()) {
@@ -316,12 +332,18 @@ export function useGoogleDrive(data, setData, showNotification) {
         }
         publishSyncStatus({ phase: 'syncing', completed: completedRef.current, error: null });
         try {
-          await processSyncOp(op, {
+          const result = await processSyncOp(op, {
             dataRef,
             setDataAndRef,
             rootFolderId: rootFolderRef.current,
             notify: (message, type) => showNotificationRef.current?.(message, type),
           });
+          if (result?.skipped) {
+            rememberSkipped(result.skipped);
+            runSkipped += 1;
+            publishSyncStatus({ phase: 'syncing', completed: completedRef.current, error: null });
+            continue;
+          }
           completedRef.current += 1;
           backoffRef.current = 1000;
           publishSyncStatus({ phase: 'syncing', completed: completedRef.current, error: null });
@@ -338,7 +360,12 @@ export function useGoogleDrive(data, setData, showNotification) {
             continue;
           }
 
-          if (isAuthError(error)) {
+          // The head op may have been skipped or coalesced while the call was in flight.
+          if (peekOp()?.id !== op.id) continue;
+
+          const classified = classifyDriveError(error);
+
+          if (classified.kind === 'auth') {
             log('SYNC', 'auth error, refreshing token');
             const ok = await GoogleAPI.refreshAccessToken();
             if (ok) continue; // same op, fresh token
@@ -351,37 +378,64 @@ export function useGoogleDrive(data, setData, showNotification) {
             break;
           }
 
-          if (!isOnline() || isNetworkError(error)) {
+          if (!isOnline() || classified.kind === 'network') {
             log('SYNC', 'network unavailable, pausing sync');
             publishSyncStatus({ phase: 'offline', completed: completedRef.current, error: null });
             break;
           }
 
           log('ERROR', 'sync op failed', error);
-          const delay = backoffRef.current;
+          const failed = recordOpFailure(op.id, classified);
+          const attempts = failed?.attempts || 1;
+          const errorInfo = {
+            message: classified.message,
+            status: classified.status,
+            reason: classified.kind,
+            driveReason: classified.reason,
+            attempts,
+            opId: op.id,
+            retryAt: null,
+          };
+
+          // Permission and quota failures cannot be fixed by retrying, and a
+          // generic error that keeps failing should stop hammering Drive: hand
+          // the decision to the user (Retry now / Skip this change).
+          const exhausted = classified.kind === 'other' && attempts >= MAX_AUTO_RETRIES;
+          if (classified.kind === 'permission' || classified.kind === 'quota' || exhausted) {
+            blockedRef.current = true;
+            paused = true;
+            publishSyncStatus({ phase: 'blocked', completed: completedRef.current, error: errorInfo });
+            return;
+          }
+
+          const delay = classified.kind === 'rate-limit' ? Math.max(backoffRef.current, 5000) : backoffRef.current;
           backoffRef.current = Math.min(backoffRef.current * 2, 30000);
-          retrying = true;
+          paused = true;
           publishSyncStatus({
             phase: 'retrying',
             completed: completedRef.current,
-            error: {
-              message: GoogleAPI.getDriveErrorMessage(error),
-              status: errorStatus(error),
-              retryAt: Date.now() + delay,
-            },
+            error: { ...errorInfo, retryAt: Date.now() + delay },
           });
-          workerTimerRef.current = setTimeout(() => {
-            workerLockRef.current = false;
-            runWorkerRef.current?.();
+          retryTimerRef.current = setTimeout(() => {
+            retryTimerRef.current = null;
+            runWorkerRef.current?.({ force: true });
           }, delay);
           return;
         }
       }
     } finally {
-      if (!retrying) {
-        workerLockRef.current = false;
-        setIsSyncing(false);
-        refreshUnsynced();
+      // The lock is always released: during backoff or while blocked the pull
+      // loop keeps running and a tab hide can no longer strand the worker.
+      workerLockRef.current = false;
+      setIsSyncing(false);
+      refreshUnsynced();
+      if (runSkipped > 0) {
+        showNotificationRef.current?.(
+          `Drive refused ${runSkipped} change${runSkipped === 1 ? '' : 's'}, so ${runSkipped === 1 ? 'it was' : 'they were'} skipped. Open sync status for details.`,
+          'info'
+        );
+      }
+      if (!paused) {
         if (pendingKickRef.current) {
           pendingKickRef.current = false;
           runWorkerRef.current?.();
@@ -389,9 +443,17 @@ export function useGoogleDrive(data, setData, showNotification) {
           pendingPullRef.current = false;
           pullRef.current?.({ reason: 'deferred' });
         }
+      } else {
+        // The retry timer or the user's action drains the whole queue, so a
+        // kick that arrived mid-run has nothing extra to do. Pulls are safe now.
+        pendingKickRef.current = false;
+        if (pendingPullRef.current) {
+          pendingPullRef.current = false;
+          pullRef.current?.({ reason: 'deferred' });
+        }
       }
     }
-  }, [setDataAndRef, refreshUnsynced, publishSyncStatus]);
+  }, [setDataAndRef, refreshUnsynced, publishSyncStatus, rememberSkipped]);
   runWorkerRef.current = runWorker;
 
   /**
@@ -404,29 +466,73 @@ export function useGoogleDrive(data, setData, showNotification) {
       pendingKickRef.current = true;
       return;
     }
-    if (workerTimerRef.current) {
-      clearTimeout(workerTimerRef.current);
-      workerTimerRef.current = null;
+    if (kickTimerRef.current) {
+      clearTimeout(kickTimerRef.current);
+      kickTimerRef.current = null;
     }
-    workerTimerRef.current = setTimeout(() => {
-      workerTimerRef.current = null;
+    kickTimerRef.current = setTimeout(() => {
+      kickTimerRef.current = null;
       runWorkerRef.current?.();
     }, delay);
   }, [refreshUnsynced]);
 
+  // Only the debounce timer is cancelled here, never the retry backoff timer.
   const flushNow = useCallback(() => {
-    if (workerTimerRef.current) {
-      clearTimeout(workerTimerRef.current);
-      workerTimerRef.current = null;
+    if (kickTimerRef.current) {
+      clearTimeout(kickTimerRef.current);
+      kickTimerRef.current = null;
     }
     if (hasPendingOps()) runWorkerRef.current?.();
   }, []);
 
   useEffect(() => {
     return () => {
-      if (workerTimerRef.current) clearTimeout(workerTimerRef.current);
+      if (kickTimerRef.current) clearTimeout(kickTimerRef.current);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, []);
+
+  // Forget any backoff or block so the next run attempts the head op at once.
+  const resetBackoff = useCallback(() => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    backoffRef.current = 1000;
+    blockedRef.current = false;
+  }, []);
+
+  /** User pressed "Retry now" in the sync panel. */
+  const retryNow = useCallback(() => {
+    resetBackoff();
+    publishSyncStatus({ error: null });
+    runWorkerRef.current?.({ force: true });
+  }, [resetBackoff, publishSyncStatus]);
+
+  /**
+   * User pressed "Skip this change": drop the head op without a Drive ACK and
+   * carry on with the rest of the queue. Only possible while the worker is
+   * paused (retrying or blocked), never mid-call.
+   */
+  const skipCurrentOp = useCallback(() => {
+    if (workerLockRef.current) return false;
+    const head = peekOp();
+    if (!head) return false;
+    const removed = skipOp(head.id);
+    if (!removed) return false;
+    log('SYNC', 'op skipped by user', { type: removed.type, id: removed.id, driveId: removed.driveId });
+    rememberSkipped({ op: removed, reason: 'manual', message: removed.lastError?.message || null });
+    resetBackoff();
+    refreshUnsynced();
+    publishSyncStatus({ phase: hasPendingOps() ? 'syncing' : 'idle', error: null });
+    runWorkerRef.current?.({ force: true });
+    return true;
+  }, [resetBackoff, refreshUnsynced, publishSyncStatus, rememberSkipped]);
+
+  const dismissSkipped = useCallback((opId) => {
+    skippedRef.current = opId ? skippedRef.current.filter((e) => e.id !== opId) : [];
+    publishSyncStatus({});
+  }, [publishSyncStatus]);
 
   // ------------------------------------------------------------------
   // Auth
@@ -471,6 +577,7 @@ export function useGoogleDrive(data, setData, showNotification) {
       setUserEmail(userInfo.email);
       setUserName(userInfo.name || userInfo.given_name || userInfo.email);
       showNotification?.('Signed in successfully', 'success');
+      resetBackoff();
       publishSyncStatus({ phase: 'idle', error: null });
       kickWorker();
     } catch (error) {
@@ -479,7 +586,7 @@ export function useGoogleDrive(data, setData, showNotification) {
     } finally {
       setIsLoadingAuth(false);
     }
-  }, [showNotification, publishSyncStatus, kickWorker]);
+  }, [showNotification, publishSyncStatus, kickWorker, resetBackoff]);
 
   const handleSignOut = useCallback(() => {
     log('SYNC', 'handleSignOut: installing guest sandbox');
@@ -606,6 +713,7 @@ export function useGoogleDrive(data, setData, showNotification) {
       }
     };
     const onOnline = () => {
+      resetBackoff();
       publishSyncStatus({ phase: 'idle', error: null });
       kickWorker();
       pull('online');
@@ -634,7 +742,7 @@ export function useGoogleDrive(data, setData, showNotification) {
       clearInterval(interval);
       clearTimeout(initial);
     };
-  }, [hasInitialLoadCompleted, isAuthenticated, driveRootFolderId, kickWorker, flushNow, publishSyncStatus]);
+  }, [hasInitialLoadCompleted, isAuthenticated, driveRootFolderId, kickWorker, flushNow, publishSyncStatus, resetBackoff]);
 
   const triggerStructureSync = useCallback((tree) => {
     const snapshot = persistSnapshot(tree);
@@ -882,6 +990,9 @@ export function useGoogleDrive(data, setData, showNotification) {
     beginAuthenticatedLoad,
     handleSignIn,
     handleSignOut,
+    retryNow,
+    skipCurrentOp,
+    dismissSkipped,
     loadFromDrive,
     pullFromDrive,
     triggerStructureSync,

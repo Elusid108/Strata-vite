@@ -21,6 +21,7 @@ import { CLIENT_ID, API_KEY, SCOPES } from './config';
 import { DEBUG_SYNC, APP_VERSION, LINK_PAGE_TYPES } from './constants';
 import { pageFromDriveJson } from './sync-merge';
 import { applyIndexOrder } from './sync-pull';
+import { getDriveErrorMessage } from './sync-errors';
 
 /**
  * @typedef {Object} StrataNode
@@ -415,22 +416,7 @@ const etagFromResponse = (response) => {
     return headers.ETag || headers.etag || headers['ETag'] || headers['etag'] || null;
 };
 
-const getDriveErrorMessage = (error) => {
-    if (!error) return 'Drive request failed';
-    const fromResult = error.result?.error?.message;
-    if (fromResult) return fromResult;
-    const raw = error.body || error.message;
-    if (typeof raw === 'string') {
-        try {
-            const parsed = JSON.parse(raw);
-            if (parsed?.error?.message) return parsed.error.message;
-        } catch {
-            /* not JSON */
-        }
-        if (error.message) return error.message;
-    }
-    return 'Drive request failed';
-};
+// Error text extraction lives in sync-errors.js (pure, unit-tested); re-exported below for existing callers.
 
 const toStrataProperties = (properties = {}) => {
     const props = {};

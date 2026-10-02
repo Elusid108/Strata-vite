@@ -16,7 +16,9 @@ import {
   enqueueOp,
   buildIndexData,
   persistNotebookData,
+  skipOp,
 } from './sync-outbox';
+import { classifyDriveError } from './sync-errors';
 import {
   findFolderContext,
   findPageContext,
@@ -77,35 +79,61 @@ function applyPageMeta(setDataAndRef, notebookId, tabId, pageId, meta, { replace
   }));
 }
 
+/**
+ * Trash, move and rename are cosmetic from the app's point of view: the local
+ * tree is already the truth. When Drive refuses one of them for permission
+ * reasons (typically a folder holding files Strata did not create, which the
+ * drive.file scope cannot touch), retrying can never succeed, so the op is
+ * dropped and reported instead of blocking the queue. Any other error rethrows.
+ */
+function skipIfPermissionDenied(op, error) {
+  const classified = classifyDriveError(error);
+  if (classified.kind !== 'permission') throw error;
+  skipOp(op.id);
+  log('SYNC', 'op skipped: permission denied', { type: op.type, driveId: op.driveId, message: classified.message });
+  return { skipped: { op, reason: 'permission', message: classified.message } };
+}
+
+function isNotFound(error) {
+  return error?.status === 404 || error?.result?.error?.code === 404;
+}
+
 async function processTrash(op) {
-  await GoogleAPI.deleteDriveItem(op.driveId);
+  try {
+    await GoogleAPI.deleteDriveItem(op.driveId);
+  } catch (error) {
+    return skipIfPermissionDenied(op, error);
+  }
   ackOp(op.id, { trashDriveId: op.driveId });
+  return null;
 }
 
 async function processMove(op) {
   try {
     await GoogleAPI.moveDriveItem(op.driveId, op.newParentId, op.oldParentId);
   } catch (error) {
-    if (error.status === 404 || error.result?.error?.code === 404) {
+    if (isNotFound(error)) {
       ackOp(op.id);
-      return;
+      return null;
     }
-    throw error;
+    return skipIfPermissionDenied(op, error);
   }
   ackOp(op.id);
+  return null;
 }
 
 async function processRename(op) {
   try {
     await GoogleAPI.renameDriveItem(op.driveId, op.name);
   } catch (error) {
-    if (error.status === 404 || error.result?.error?.code === 404) {
+    if (isNotFound(error)) {
       ackOp(op.id);
-      return;
+      return null;
     }
-    throw error;
+    return skipIfPermissionDenied(op, error);
   }
   ackOp(op.id);
+  return null;
 }
 
 async function processEnsureFolder(op, ctx) {
@@ -352,19 +380,18 @@ async function processSaveIndex(op, ctx) {
 
 /**
  * Process a single outbox op. Throws SyncNotReadyError when a parent ID is missing.
+ * Resolves to `{ skipped: { op, reason, message } }` when the op was dropped
+ * because Drive refused it for permission reasons, otherwise to null.
  */
 export async function processSyncOp(op, ctx) {
   log('SYNC', 'process op', { type: op.type, id: op.id, coalesceKey: op.coalesceKey });
   switch (op.type) {
     case 'trash':
-      await processTrash(op);
-      break;
+      return processTrash(op);
     case 'move':
-      await processMove(op);
-      break;
+      return processMove(op);
     case 'rename':
-      await processRename(op);
-      break;
+      return processRename(op);
     case 'ensureFolder':
       await processEnsureFolder(op, ctx);
       break;
@@ -381,6 +408,7 @@ export async function processSyncOp(op, ctx) {
       log('SYNC', 'unknown op type, dropping', op.type);
       ackOp(op.id);
   }
+  return null;
 }
 
 export { persistNotebookData };

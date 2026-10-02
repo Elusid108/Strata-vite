@@ -21,7 +21,7 @@ export function describeSyncOp(op, data) {
       return `Saving page: ${found?.page?.name || 'Untitled'}`;
     }
     case 'trash':
-      return 'Deleting from Drive';
+      return op.name ? `Deleting from Drive: ${op.name}` : 'Deleting from Drive';
     case 'move':
       return 'Moving item';
     case 'rename':

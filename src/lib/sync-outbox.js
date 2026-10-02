@@ -237,14 +237,60 @@ export function enqueueOp(payload, coalesceKey) {
   return op;
 }
 
+/**
+ * Queue trash ops. Items may be Drive IDs or `{ driveId, name }`; the name is
+ * kept on the op so the sync panel can say what is being deleted even after
+ * the item has left the local tree.
+ */
 export function enqueueTrash(driveIds) {
-  const ids = (Array.isArray(driveIds) ? driveIds : [driveIds])
-    .map((item) => (typeof item === 'string' ? item : item?.driveId))
-    .filter(Boolean);
-  for (const driveId of ids) {
-    enqueueOp({ type: 'trash', driveId }, `trash:${driveId}`);
+  const items = (Array.isArray(driveIds) ? driveIds : [driveIds])
+    .map((item) => (typeof item === 'string' ? { driveId: item } : { driveId: item?.driveId, name: item?.name }))
+    .filter((item) => item.driveId);
+  for (const { driveId, name } of items) {
+    const payload = { type: 'trash', driveId };
+    if (name) payload.name = name;
+    enqueueOp(payload, `trash:${driveId}`);
   }
-  return ids;
+  return items.map((item) => item.driveId);
+}
+
+/**
+ * Record a failed attempt on an op (persisted so reloads keep the count).
+ * Returns the updated op, or null when the op is no longer queued.
+ */
+export function recordOpFailure(opId, { status = null, reason = null, message = null } = {}) {
+  let updated = null;
+  mutate((state) => {
+    const op = state.ops.find((o) => o.id === opId);
+    if (!op) return;
+    op.attempts = (op.attempts || 0) + 1;
+    op.lastError = { status, reason, message, at: Date.now() };
+    updated = { ...op };
+  });
+  return updated;
+}
+
+/**
+ * Drop an op without a Drive ACK. Returns the removed op, or null.
+ *
+ * The tombstone of a skipped trash op is deliberately KEPT: it keeps the
+ * deleted item hidden from the changes-feed pull (sync-pull), the Drive merge
+ * (sync-merge) and the boot merge (useDataLoader). The Drive item itself is
+ * left where it is; the user can bin it from Drive directly.
+ */
+export function skipOp(opId) {
+  let removed = null;
+  mutate((state) => {
+    const idx = state.ops.findIndex((o) => o.id === opId);
+    if (idx < 0) return;
+    removed = state.ops[idx];
+    state.ops.splice(idx, 1);
+    if (removed.type === 'trash' && removed.driveId) {
+      const tombstone = state.tombstones.find((t) => t.driveId === removed.driveId);
+      if (tombstone) tombstone.skippedAt = Date.now();
+    }
+  });
+  return removed;
 }
 
 export function ackOp(opId, { trashDriveId } = {}) {

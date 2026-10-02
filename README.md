@@ -39,6 +39,7 @@ Created by **Chris Moore Designs LLC**.
 * **Push + Pull:** Edits go out through a persisted outbox (survives reloads, retries with backoff). Changes made on other devices are pulled in via the Drive changes feed on focus, on reconnect, and every minute while the app is visible.
 * **Conflict-safe:** Before writing, the app checks whether Drive changed since it last synced. Block pages merge block-by-block; other page types keep both versions (a "conflict copy" page) so nothing is silently overwritten.
 * **Offline:** Works from the local copy while offline and shows "Offline · N pending"; queued changes upload when you reconnect. If the Google session expires, the app asks you to sign in again instead of retrying forever.
+* **Never stuck:** Strata only asks Google for the `drive.file` scope, so it can't touch files it didn't create. If Drive refuses to delete a folder because it holds such a file, Strata trashes what it owns, leaves the folder in place and tells you. Any other change that keeps failing shows "Needs attention" in the sync footer with **Retry now** and **Skip this change** buttons. Settings → Google Account offers **Reconnect Google Drive** to re-authorize without losing local data.
 * **Instant start:** The last synced workspace renders immediately; Drive is re-read in the background and only changed pages are downloaded.
 
 ### 📱 Desktop, Tablet, Phone

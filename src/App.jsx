@@ -23,7 +23,7 @@ function MobileShell() {
   const { notebook, tab, page } = getActiveContext(data, activeNotebookId, activeTabId, activePageId);
   const showEditor = mobilePane === 'editor' && !!page;
   const phase = syncStatus?.phase || 'idle';
-  const dot = phase === 'retrying' || phase === 'signin-required' ? 'bg-amber-500' : phase === 'offline' ? 'bg-gray-400' : phase === 'idle' ? 'bg-emerald-500' : 'bg-blue-500 animate-pulse';
+  const dot = phase === 'retrying' || phase === 'blocked' || phase === 'signin-required' ? 'bg-amber-500' : phase === 'offline' ? 'bg-gray-400' : phase === 'idle' ? 'bg-emerald-500' : 'bg-blue-500 animate-pulse';
 
   return (
     <div className="app-shell flex flex-col bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200">

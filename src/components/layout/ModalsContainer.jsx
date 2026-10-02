@@ -14,6 +14,7 @@ import * as emoji from 'node-emoji';
 import {
   X,
   Settings,
+  GoogleG,
   Sun,
   Moon,
   Monitor,
@@ -78,6 +79,11 @@ export function ModalsContainer() {
     showSignOutConfirm,
     setShowSignOutConfirm,
     handleSignOut,
+    handleSignIn,
+    userEmail,
+    userName,
+    hasUnsyncedChanges,
+    syncStatus,
     syncConflict,
     showSettings,
     showDriveUrlModal,
@@ -528,6 +534,53 @@ export function ModalsContainer() {
               )}
               <p className="text-xs text-gray-400 mt-1">Improves performance by unmounting older embed pages (Google Drive, Miro, etc.).</p>
             </div>
+
+            {isAuthenticated && (
+              <div className="mb-6">
+                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <span className="flex items-center gap-2"><GoogleG size={14} /> Google Account</span>
+                </label>
+                <div className="rounded-lg border border-gray-200 dark:border-gray-600 p-3">
+                  <div className="text-sm font-medium dark:text-white truncate">{userName}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mb-3">{userEmail}</div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSettings(false);
+                        handleSignIn();
+                      }}
+                      className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-200"
+                    >
+                      Reconnect Google Drive
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (hasUnsyncedChanges) {
+                          const pending = syncStatus?.remaining || 0;
+                          showNotification(
+                            pending > 0
+                              ? `${pending} change${pending === 1 ? ' is' : 's are'} still waiting to sync. Open sync status to retry or skip ${pending === 1 ? 'it' : 'them'} before signing out.`
+                              : 'Please wait for sync to finish before signing out.',
+                            'error'
+                          );
+                          return;
+                        }
+                        setShowSettings(false);
+                        setShowSignOutConfirm(true);
+                      }}
+                      className="px-3 py-1.5 text-sm rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Reconnect re-authorizes Strata with Google and refreshes your session. It cannot give Strata access to files that were created outside Strata.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="border-t dark:border-gray-700 pt-4">
               <button
